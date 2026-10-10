@@ -305,8 +305,8 @@
       if(!Number.isFinite(k) || Math.abs(k)<1e-12) return;
       const r = 1/k;
       if(!Number.isFinite(r) || Math.abs(r) < minRadius) return;
-      const zkx = 2*(a.x*a.k+b.x*b.k+c.x*c.k-opposite.x*opposite.k);
-      const zky = 2*(a.y*a.k+b.y*b.k+c.y*c.k-opposite.y*opposite.k);
+      const zkx = 2*(a.x*a.k+b.x*b.k+c.x*c.k) - opposite.x*opposite.k;
+      const zky = 2*(a.y*a.k+b.y*b.k+c.y*c.k) - opposite.y*opposite.k;
       const x = zkx/k, y = zky/k;
       if(!Number.isFinite(x) || !Number.isFinite(y)) return;
       const next = makeCircle(x,y,r,depth);
