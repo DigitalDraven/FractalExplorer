@@ -32,6 +32,9 @@
   // ---- state ----
   const state = {
     type: 'mandelbrot',
+    gasketDepth: 5,
+    gasketStroke: 1,
+    gasketFill: false,
     cx: -0.5, cy: 0.0,     // center in complex plane
     scale: 3.2,             // width of view in complex plane
     maxIter: 300,
@@ -261,11 +264,85 @@
 
   // ---- render dispatcher ----
   function render(targetCanvas, targetCtx, tw, th, onDone){
-    if(state.shadingMode === 'trap' || state.shadingMode === 'filigree'){
+    if(state.type === 'apollonian'){
+      renderApollonianGasket(targetCtx, tw, th, onDone);
+    } else if(state.shadingMode === 'trap' || state.shadingMode === 'filigree'){
       renderTrapField(targetCtx, tw, th, onDone);
     } else {
       renderStandard(targetCtx, tw, th, onDone);
     }
+  }
+
+  // ---- Apollonian Gasket: Descartes circle packing ported from the Gemini prototype ----
+  function renderApollonianGasket(targetCtx, tw, th, onDone){
+    const token = ++renderToken;
+    progressBar.classList.add('is-active');
+    progressBar.style.width = '8%';
+    const bg = hexToRgb(state.bg);
+    targetCtx.fillStyle = state.bg;
+    targetCtx.fillRect(0, 0, tw, th);
+
+    // The source prototype uses a circular viewport. Keep the same visual framing,
+    // while mapping the app's shared center/scale to pan and zoom the gasket.
+    const baseRadius = Math.min(tw, th) * 0.46;
+    const zoom = 3.2 / Math.max(1e-9, state.scale);
+    const outerRadius = baseRadius * Math.min(zoom, 1000);
+    const sx = tw / 2 + (state.cx + 0.5) * (tw / state.scale);
+    const sy = th / 2 - state.cy * (th / state.scale);
+    const c0 = {x:0, y:0, r:-outerRadius, k:-1/outerRadius, depth:0};
+    const rInner = outerRadius * (2 * Math.sqrt(3) - 3);
+    const dDist = outerRadius - rInner;
+    const makeCircle = (x,y,r,depth) => ({x,y,r,k:1/r,depth});
+    const c1 = makeCircle(0,dDist,rInner,0);
+    const c2 = makeCircle(dDist*Math.cos(210*Math.PI/180),dDist*Math.sin(210*Math.PI/180),rInner,0);
+    const c3 = makeCircle(dDist*Math.cos(330*Math.PI/180),dDist*Math.sin(330*Math.PI/180),rInner,0);
+    const circles = [c1,c2,c3];
+    const maxDepth = state.gasketDepth;
+    const minRadius = Math.max(0.45, Math.min(tw,th)/Math.max(tw,th));
+    function recurse(a,b,c,opposite,depth){
+      if(depth > maxDepth || circles.length > 180000 || token !== renderToken) return;
+      const k = 2*(a.k+b.k+c.k)-opposite.k;
+      if(!Number.isFinite(k) || Math.abs(k)<1e-12) return;
+      const r = 1/k;
+      if(!Number.isFinite(r) || Math.abs(r) < minRadius) return;
+      const zkx = 2*(a.x*a.k+b.x*b.k+c.x*c.k-opposite.x*opposite.k);
+      const zky = 2*(a.y*a.k+b.y*b.k+c.y*c.k-opposite.y*opposite.k);
+      const x = zkx/k, y = zky/k;
+      if(!Number.isFinite(x) || !Number.isFinite(y)) return;
+      const next = makeCircle(x,y,r,depth);
+      circles.push(next);
+      recurse(a,b,next,c,depth+1);
+      recurse(b,c,next,a,depth+1);
+      recurse(c,a,next,b,depth+1);
+    }
+    recurse(c1,c2,c3,c0,1);
+    recurse(c0,c1,c2,c3,1);
+    recurse(c0,c2,c3,c1,1);
+    recurse(c0,c3,c1,c2,1);
+    circles.sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
+    const palette = buildPaletteLinearFn();
+    const start = performance.now();
+    for(let i=0;i<circles.length;i++){
+      if(token !== renderToken) return;
+      const c = circles[i];
+      const radius = Math.abs(c.r);
+      const x = sx + c.x, y = sy - c.y;
+      if(x+radius<0 || x-radius>tw || y+radius<0 || y-radius>th) continue;
+      const t = Math.max(0, Math.min(1, c.depth / Math.max(1,maxDepth)));
+      const rgb = palette(state.gasketFill ? 0.15 + 0.8*t : 0.25 + 0.7*t);
+      const color = `rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])})`;
+      targetCtx.beginPath();
+      targetCtx.arc(x,y,radius,0,Math.PI*2);
+      if(state.gasketFill){ targetCtx.fillStyle = color; targetCtx.fill(); }
+      targetCtx.lineWidth = state.gasketStroke;
+      targetCtx.strokeStyle = state.gasketFill ? 'rgba(5,5,18,0.9)' : color;
+      targetCtx.stroke();
+    }
+    progressBar.style.width = '100%';
+    progressBar.classList.remove('is-active');
+    progressBar.style.width = '0%';
+    document.getElementById('renderTime').textContent = `gasket · ${circles.length} circles · ${(performance.now()-start).toFixed(0)}ms`;
+    if(onDone) onDone();
   }
 
   // ---- standard single-pass render (color bands / potential-based lighting) ----
@@ -537,11 +614,20 @@
   // ---- controls wiring ----
   const fractalTypeSel = document.getElementById('fractalType');
   const juliaControls = document.getElementById('juliaControls');
+  const gasketControls = document.getElementById('gasketControls');
+  function syncTypeControls(){
+    juliaControls.style.display = state.type === 'julia' ? 'block' : 'none';
+    gasketControls.style.display = state.type === 'apollonian' ? 'block' : 'none';
+  }
   fractalTypeSel.addEventListener('change', () => {
     state.type = fractalTypeSel.value;
-    juliaControls.style.display = state.type === 'julia' ? 'block' : 'none';
+    syncTypeControls();
     renderMain();
   });
+  document.getElementById('gasketDepth').addEventListener('input', e => { state.gasketDepth = parseInt(e.target.value,10); renderMain(); });
+  document.getElementById('gasketStroke').addEventListener('input', e => { state.gasketStroke = parseFloat(e.target.value); renderMain(); });
+  document.getElementById('gasketFill').addEventListener('change', e => { state.gasketFill = e.target.checked; renderMain(); });
+  syncTypeControls();
 
   document.getElementById('juliaRe').addEventListener('input', e => {
     state.juliaRe = parseFloat(e.target.value); renderMain();

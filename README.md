@@ -1,8 +1,8 @@
-# Fractal Explorer 2.0.4
+# Fractal Explorer 2.1.0
 
 A modular evolution of Fractal Explorer 1.8, retaining its original control panel, navigation, orbit-trap renderer, lighting controls, Julia/Mandelbrot family, and PNG export.
 
-## What's new in 2.0.4
+## What's new in 2.1.0
 - Split the original single-file app into `index.html`, `css/main.css`, and `js/app.js`.
 - Added five editable art-direction presets: Blue Egg, Cosmic Magenta, Thorn Blue Lake, Golden Filigree, and Electric Indigo.
 - Added a Gold Filigree shading style intended for luminous, narrow contour-like bands.
@@ -29,7 +29,7 @@ This is an initial 2.0.1 foundation release. The Gemini project's Apollonian Gas
 - Added a small-screen layout fallback.
 
 
-## 2.0.4
+## 2.1.0
 
 - Rebuilt range-slider tracks and thumbs with explicit WebKit and Firefox styling for improved visibility.
 - Fixed the primary export button cascade: the general button background rule no longer overrides the accent background.
@@ -37,13 +37,18 @@ This is an initial 2.0.1 foundation release. The Gemini project's Apollonian Gas
 - Kept the renderer, presets, layout, and export dimensions unchanged.
 
 
-## 2.0.4 patch
+## 2.1.0 patch
 - Keeps Save PNG clearly visible at rest and gives it a readable busy state.
 - Makes the render progress indicator thicker, brighter, and visible while rendering.
 - Improves range slider track and thumb contrast.
 
 
-## 2.0.4 — Zoom-box visibility
+## 2.1.0 — Zoom-box visibility
 - Raises the zoom-selection overlay above the fractal canvas with a brighter border and translucent fill.
 - Keeps drag updates active when the pointer leaves the canvas and constrains the selection to canvas bounds.
 - Uses the displayed canvas aspect ratio for the selection geometry.
+
+
+## 2.1.0
+
+Adds an Apollonian Gasket mode based on the Descartes circle-packing construction from the Gemini prototype, with recursion depth, stroke width, fill, shared palette, pan/zoom, and PNG export. Existing 2.0.4 rendering and interface fixes are retained.

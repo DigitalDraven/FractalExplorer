@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fractal Explorer 2.0.4</title>
+<title>Fractal Explorer 2.1.0</title>
 <link rel="stylesheet" href="css/main.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
 <header>
   <div class="brand">
     <span class="mark"></span>
-    <h1>Fractal Explorer <span class="version-chip">2.0.4</span></h1>
+    <h1>Fractal Explorer <span class="version-chip">2.1.0</span></h1>
     <span class="sub">/ escape-time renderer</span>
   </div>
   <div class="status" id="statusLine">iter <b id="statIter">300</b> &nbsp;·&nbsp; zoom <b id="statZoom">1.0×</b></div>
@@ -40,7 +40,14 @@
         <option value="julia">Julia set</option>
         <option value="burningship">Burning ship</option>
         <option value="tricorn">Tricorn</option>
+        <option value="apollonian">Apollonian Gasket</option>
       </select>
+      <div id="gasketControls" style="display:none; margin-top:12px;">
+        <div class="row"><label for="gasketDepth">Recursion depth</label><input type="range" id="gasketDepth" min="1" max="8" step="1" value="5" style="width:150px;"></div>
+        <div class="hint">Higher depth adds smaller tangent circles and takes longer to draw.</div>
+        <div class="row"><label for="gasketStroke">Line thickness</label><input type="range" id="gasketStroke" min="0.5" max="3" step="0.5" value="1" style="width:150px;"></div>
+        <div class="row"><label for="gasketFill">Fill circles</label><input type="checkbox" id="gasketFill"></div>
+      </div>
       <div id="juliaControls" style="display:none; margin-top:12px;">
         <div class="row">
           <label>c (real)</label>
