@@ -1087,21 +1087,46 @@
     const fx = (px - rect.left) / rect.width;
     const fy = (py - rect.top) / rect.height;
     const scaleX = state.scale;
-    const scaleY = state.scale / ASPECT;
+    // Use the displayed canvas aspect ratio so selection and coordinate mapping agree.
+    const displayAspect = rect.width / rect.height;
+    const scaleY = state.scale / displayAspect;
     const xmin = state.cx - scaleX/2, ymax = state.cy + scaleY/2;
     return [ xmin + fx*scaleX, ymax - fy*scaleY ];
   }
 
   // ---- drag-to-zoom ----
   let dragging = false, dragStart = null, dragCurrent = null;
+  function clampPoint(x, y, rect){
+    return {
+      x: Math.max(0, Math.min(rect.width, x)),
+      y: Math.max(0, Math.min(rect.height, y))
+    };
+  }
+  function updateZoomBox(point, rect){
+    if(!dragStart) return;
+    const aspect = rect.width / rect.height;
+    const dx = point.x - dragStart.x, dy = point.y - dragStart.y;
+    const sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1;
+    // Pick the larger drag dimension, then derive the other from the canvas ratio.
+    let w = Math.max(Math.abs(dx), Math.abs(dy) * aspect);
+    let h = w / aspect;
+    // Keep the box inside the canvas, including when dragging from any corner.
+    const maxW = sx > 0 ? rect.width - dragStart.x : dragStart.x;
+    const maxH = sy > 0 ? rect.height - dragStart.y : dragStart.y;
+    const factor = Math.min(1, maxW / Math.max(w, 1e-12), maxH / Math.max(h, 1e-12));
+    w *= factor; h *= factor;
+    const end = {x: dragStart.x + sx*w, y: dragStart.y + sy*h};
+    dragCurrent = end;
+    selectBox.style.left = Math.min(dragStart.x, end.x) + 'px';
+    selectBox.style.top = Math.min(dragStart.y, end.y) + 'px';
+    selectBox.style.width = w + 'px';
+    selectBox.style.height = h + 'px';
+  }
   canvas.addEventListener('mousedown', e => {
     if(e.button !== 0) return;
     const rect = canvas.getBoundingClientRect();
     dragging = true;
-    dragStart = {
-      x: Math.max(0, Math.min(rect.width, e.clientX - rect.left)),
-      y: Math.max(0, Math.min(rect.height, e.clientY - rect.top))
-    };
+    dragStart = clampPoint(e.clientX - rect.left, e.clientY - rect.top, rect);
     dragCurrent = {...dragStart};
     selectBox.style.zIndex = '20';
     selectBox.style.left = dragStart.x + 'px';
@@ -1113,42 +1138,40 @@
 
   window.addEventListener('mousemove', e => {
     const rect = canvas.getBoundingClientRect();
-    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
     const [re, im] = pixelToComplex(e.clientX, e.clientY);
     document.getElementById('roCursor').textContent = `${re.toFixed(6)}, ${im.toFixed(6)}`;
     if(!dragging || !dragStart) return;
-    const boundedX = Math.max(0, Math.min(rect.width, cx));
-    const boundedY = Math.max(0, Math.min(rect.height, cy));
-    dragCurrent = {x: boundedX, y: boundedY};
-    // Keep the box inside the canvas and use a real rectangle in either drag direction.
-    const left = Math.min(dragStart.x, boundedX);
-    const top = Math.min(dragStart.y, boundedY);
-    selectBox.style.left = left + 'px';
-    selectBox.style.top = top + 'px';
-    selectBox.style.width = Math.abs(boundedX - dragStart.x) + 'px';
-    selectBox.style.height = Math.abs(boundedY - dragStart.y) + 'px';
+    updateZoomBox(clampPoint(e.clientX - rect.left, e.clientY - rect.top, rect), rect);
   });
 
   window.addEventListener('mouseup', e => {
     if(!dragging || !dragStart) return;
     dragging = false;
-    selectBox.style.display = 'none';
     const rect = canvas.getBoundingClientRect();
-    const endX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-    const endY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
-    const left = Math.min(dragStart.x, endX), right = Math.max(dragStart.x, endX);
-    const top = Math.min(dragStart.y, endY), bottom = Math.max(dragStart.y, endY);
-    const boxW = right - left, boxH = bottom - top;
+    updateZoomBox(clampPoint(e.clientX - rect.left, e.clientY - rect.top, rect), rect);
+    selectBox.style.display = 'none';
+    const left = Math.min(dragStart.x, dragCurrent.x);
+    const top = Math.min(dragStart.y, dragCurrent.y);
+    const boxW = Math.abs(dragCurrent.x - dragStart.x);
+    const boxH = Math.abs(dragCurrent.y - dragStart.y);
     if(boxW < 8 || boxH < 8){ dragStart = null; dragCurrent = null; return; }
 
-    // Use both selected corners. pixelToComplex handles the inverted screen Y axis.
-    const [reA, imA] = pixelToComplex(rect.left + left, rect.top + top);
-    const [reB, imB] = pixelToComplex(rect.left + right, rect.top + bottom);
-    const newScaleX = Math.abs(reB - reA);
-    const newScaleY = Math.abs(imA - imB) * ASPECT;
-    state.cx = (reA + reB) / 2;
-    state.cy = (imA + imB) / 2;
-    state.scale = Math.max(1e-12, Math.max(newScaleX, newScaleY));
+    // Center on the exact selected region; derive scale from its width because
+    // the selection now has the same aspect ratio as the displayed canvas.
+    const [centerRe, mappedCenterIm] = pixelToComplex(
+      rect.left + left + boxW/2,
+      rect.top + top + boxH/2
+    );
+    // Burning Ship's renderers intentionally flip the imaginary-axis direction to
+    // preserve the Gemini-style upright orientation. Drag selection is in screen
+    // coordinates, so mirror its vertical center for this fractal only. Leave the
+    // shared mapping untouched because cursor, double-click, and other types use it.
+    const centerIm = state.type === 'burningship'
+      ? state.cy - (mappedCenterIm - state.cy)
+      : mappedCenterIm;
+    state.cx = centerRe;
+    state.cy = centerIm;
+    state.scale = Math.max(1e-12, state.scale * boxW / rect.width);
     dragStart = null;
     dragCurrent = null;
     renderMain();

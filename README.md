@@ -1,6 +1,15 @@
-# Fractal Explorer 2.1.5a
+# Fractal Explorer 2.1.6a
 
-## Changes in 2.1.5a
+## Changes in 2.1.6a
+- Corrected drag-to-zoom vertical center mapping for Burning Ship only; other fractal types and Burning Ship double-click zoom are unchanged.
+
+## Changes in 2.1.6
+- Restored aspect-ratio-constrained zoom selection based on the displayed canvas dimensions.
+- Made zoom center and scale derive from the exact visible selection rectangle.
+- Unified coordinate mapping with the displayed canvas aspect ratio; supports dragging in any direction and clamps the selection to canvas bounds.
+
+
+## Changes in 2.1.6
 
 - Fixed Burning Ship orientation for orbit-trap bubbles and Gold Filigree orbit lines.
 - Routed Burning Ship Potential Folds through the derivative-based lighting renderer instead of the escape-time-only renderer.
