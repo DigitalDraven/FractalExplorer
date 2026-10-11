@@ -1,4 +1,5 @@
 # Fractal Explorer 2.1.3e
+https://digitaldraven.github.io/FractalExplorer/
 
 ## Changes in 2.1.3e
 - When **Golden Filigree** and **Circular Ring Trap** are both selected, use a Gemini-style orbit-trap renderer: track the minimum distance to the circular trap through the orbit and color both escaped and interior pixels using exponential glow plus a small escape-time contribution.
