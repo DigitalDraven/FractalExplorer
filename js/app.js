@@ -134,7 +134,7 @@
     const maxIter = state.maxIter;
     let zr2 = zr*zr, zi2 = zi*zi;
 
-    while(n < maxIter && (zr2 + zi2) < 4){
+    while(n < maxIter && (zr2 + zi2) < (kind === 'burningship' ? 32.0 : 4)){
       if(needDeriv){
         if(kind === 'burningship'){
           // w = |Re z| + i|Im z|; dw = sign(Re z)*dRe(z) + i*sign(Im z)*dIm(z)
@@ -292,7 +292,7 @@
     // origin always starts within the bailout radius).
     let minDist2 = isJuliaVar ? trapDistanceSquared(zr-trapX, zi-trapY) : Infinity;
     let minN = 0;
-    while(n < maxIter && (zr2 + zi2) < 4){
+    while(n < maxIter && (zr2 + zi2) < (kind === 'burningship' ? 32.0 : 4)){
       if(kind === 'burningship'){
         const nzi = Math.abs(2*zr*zi) + ci;
         const nzr = zr2 - zi2 + cr;
@@ -362,7 +362,9 @@
       if(token !== renderToken) return;
       const rowEnd = Math.min(th, row + rowsPerChunk);
       for(let py = row; py < rowEnd; py++){
-        const y0 = ymax - (py / Math.max(1, th-1)) * (ymax-ymin);
+        const y0 = kind === 'burningship'
+          ? ymin + (py / Math.max(1, th-1)) * (ymax-ymin)
+          : ymax - (py / Math.max(1, th-1)) * (ymax-ymin);
         for(let px = 0; px < tw; px++){
           const x0 = xmin + (px / Math.max(1, tw-1)) * (xmax-xmin);
           let x = kind === 'julia' ? x0 : 0;
@@ -493,6 +495,89 @@
     if(onDone) onDone();
   }
 
+  // ---- Gemini-compatible Burning Ship renderer ----
+  // Mirrors Gemini's Burning Ship iteration and smooth escape-time coloring,
+  // using this app's current palette and canvas/state architecture.
+  function renderBurningShipGemini(targetCtx, tw, th, onDone){
+    const factor = 1.5; // Gemini Burning Ship preset enables 1.5x supersampling
+    const hiCanvas = document.createElement('canvas');
+    hiCanvas.width = Math.max(1, Math.round(tw * factor));
+    hiCanvas.height = Math.max(1, Math.round(th * factor));
+    const hiCtx = hiCanvas.getContext('2d');
+    const token = ++renderToken;
+    const imgData = hiCtx.createImageData(hiCanvas.width, hiCanvas.height);
+    const data = imgData.data;
+    const palette = buildPaletteFn();
+    const maxIter = state.maxIter;
+    const xmin = state.cx - state.scale / 2;
+    const xmax = state.cx + state.scale / 2;
+    const scaleY = state.scale / (tw / th);
+    const ymin = state.cy - scaleY / 2;
+    const ymax = state.cy + scaleY / 2;
+    let row = 0;
+    const rowsPerChunk = Math.max(1, Math.floor(hiCanvas.height / 100));
+    const t0 = performance.now();
+    progressBar.classList.add('is-active');
+    progressBar.style.width = '3%';
+
+    function chunk(){
+      if(token !== renderToken) return;
+      const end = Math.min(hiCanvas.height, row + rowsPerChunk);
+      for(let py = row; py < end; py++){
+        // Match Gemini's complex-plane orientation: y0 starts at ymin and increases down the canvas.
+        const ci = ymin + (py / Math.max(1, hiCanvas.height - 1)) * (ymax - ymin);
+        for(let px = 0; px < hiCanvas.width; px++){
+          const cr = xmin + (px / Math.max(1, hiCanvas.width - 1)) * (xmax - xmin);
+          let zr = 0, zi = 0, n = 0;
+          let zr2 = 0, zi2 = 0;
+          // Gemini uses an escape-radius squared of 32 for its pixel renderer.
+          while(n < maxIter && (zr2 + zi2) <= 32.0){
+            const nextR = zr2 - zi2 + cr;
+            const nextI = 2.0 * Math.abs(zr * zi) + ci;
+            zr = nextR; zi = nextI;
+            zr2 = zr * zr; zi2 = zi * zi;
+            n++;
+          }
+          let rgb;
+          if(n >= maxIter){
+            rgb = hexToRgb(state.interior);
+          } else {
+            // Gemini smooth iteration count: nu = log2(log(|z|)/log(2)).
+            const magnitudeSq = Math.max(zr2 + zi2, 1e-300);
+            const logZn = Math.log(magnitudeSq) / 2.0;
+            const nu = Math.log2(Math.max(logZn, 1e-300) / Math.LN2);
+            const smoothN = n + 1.0 - nu;
+            const t = Math.max(0, Math.min(0.999999, smoothN / maxIter));
+            rgb = palette(t);
+          }
+          const idx = (py * hiCanvas.width + px) * 4;
+          data[idx] = Math.round(rgb[0]);
+          data[idx+1] = Math.round(rgb[1]);
+          data[idx+2] = Math.round(rgb[2]);
+          data[idx+3] = 255;
+        }
+      }
+      row = end;
+      progressBar.style.width = (row / hiCanvas.height * 100) + '%';
+      if(row < hiCanvas.height){
+        requestAnimationFrame(chunk);
+      } else {
+        hiCtx.putImageData(imgData, 0, 0);
+        targetCtx.save();
+        targetCtx.imageSmoothingEnabled = true;
+        targetCtx.imageSmoothingQuality = 'high';
+        targetCtx.clearRect(0, 0, tw, th);
+        targetCtx.drawImage(hiCanvas, 0, 0, tw, th);
+        targetCtx.restore();
+        progressBar.style.width = '0%';
+        progressBar.classList.remove('is-active');
+        document.getElementById('renderTime').textContent = `rendered in ${(performance.now()-t0).toFixed(0)}ms`;
+        if(onDone) onDone();
+      }
+    }
+    requestAnimationFrame(chunk);
+  }
+
   // ---- standard single-pass render (color bands / potential-based lighting) ----
   function renderStandard(targetCtx, tw, th, onDone){
     progressBar.classList.add('is-active');
@@ -521,7 +606,9 @@
       if(token !== renderToken) return; // cancelled
       const rowEnd = Math.min(th, row + rowsPerChunk);
       for(let y = row; y < rowEnd; y++){
-        const py = ymax - (y / (th-1)) * (ymax - ymin);
+        const py = kind === 'burningship'
+          ? ymin + (y / (th-1)) * (ymax - ymin)
+          : ymax - (y / (th-1)) * (ymax - ymin);
         for(let x = 0; x < tw; x++){
           const px = xmin + (x / (tw-1)) * (xmax - xmin);
           const rgb = computePixelColor(px, py, kind, jr, ji, needDeriv, light, paletteBands, paletteLinear, interiorRgb);
@@ -573,7 +660,9 @@
       if(token !== renderToken) return;
       const rowEnd = Math.min(th, row + rowsPerChunk);
       for(let y = row; y < rowEnd; y++){
-        const py = ymax - (y / (th-1)) * (ymax - ymin);
+        const py = kind === 'burningship'
+          ? ymin + (y / (th-1)) * (ymax - ymin)
+          : ymax - (y / (th-1)) * (ymax - ymin);
         for(let x = 0; x < tw; x++){
           const px = xmin + (x / (tw-1)) * (xmax - xmin);
           const field = computeOrbitField(px, py, kind, jr, ji, trapX, trapY);
@@ -783,6 +872,24 @@
   }
   fractalTypeSel.addEventListener('change', () => {
     state.type = fractalTypeSel.value;
+    if(state.type === 'burningship'){
+      // Gemini Burning Ship preset framing. The app's scale represents the complex-plane width.
+      state.cx = -1.7512;
+      state.cy = -0.0235;
+      state.scale = 3.2 / 28.0;
+      state.maxIter = 160;
+      state.autoIter = false;
+      // Burning Ship defaults to the app's Red Ember palette, without changing it on every render.
+      state.colors = ['#0a0303', '#8f1010', '#ffe3d6'];
+      state.bg = '#0a0303';
+      document.getElementById('colorA').value = state.colors[0];
+      document.getElementById('colorB').value = state.colors[1];
+      document.getElementById('colorC').value = state.colors[2];
+      document.getElementById('colorBg').value = state.bg;
+      document.getElementById('maxIter').value = String(state.maxIter);
+      document.getElementById('autoIter').checked = false;
+      updatePalettePreview();
+    }
     syncTypeControls();
     renderMain();
   });
@@ -953,7 +1060,18 @@
   });
 
   document.getElementById('resetBtn').addEventListener('click', () => {
-    state.cx = -0.5; state.cy = 0.0; state.scale = 3.2;
+    if(state.type === 'burningship'){
+      // Reset Burning Ship to its Gemini-compatible default view, not the generic Mandelbrot view.
+      state.cx = -1.7512;
+      state.cy = -0.0235;
+      state.scale = 3.2 / 28.0;
+      state.maxIter = 160;
+      state.autoIter = false;
+      document.getElementById('maxIter').value = String(state.maxIter);
+      document.getElementById('autoIter').checked = false;
+    } else {
+      state.cx = -0.5; state.cy = 0.0; state.scale = 3.2;
+    }
     renderMain();
   });
   document.getElementById('zoomInBtn').addEventListener('click', () => {

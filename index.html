@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fractal Explorer 2.1.3e</title>
+<title>Fractal Explorer 2.1.5a</title>
 <link rel="stylesheet" href="css/main.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
 <header>
   <div class="brand">
     <span class="mark"></span>
-    <h1>Fractal Explorer <span class="version-chip">2.1.3e</span></h1>
+    <h1>Fractal Explorer <span class="version-chip">2.1.5a</span></h1>
     <span class="sub">/ escape-time renderer</span>
   </div>
   <div class="status" id="statusLine">iter <b id="statIter">300</b> &nbsp;·&nbsp; zoom <b id="statZoom">1.0×</b></div>
@@ -34,11 +34,11 @@
 
   <aside>
     <div class="section">
-      <div class="section-title">Fractal type</div>
+      <div class="section-title">Fractal Type</div>
       <select id="fractalType">
-        <option value="mandelbrot">Mandelbrot set</option>
-        <option value="julia">Julia set</option>
-        <option value="burningship">Burning ship</option>
+        <option value="mandelbrot">Mandelbrot Set</option>
+        <option value="julia">Julia Set</option>
+        <option value="burningship">Burning Ship</option>
         <option value="tricorn">Tricorn</option>
         <option value="apollonian">Apollonian Gasket</option>
       </select>
@@ -84,17 +84,17 @@
         <input type="range" id="cycleScale" min="8" max="200" step="1" value="42" style="width:150px;">
       </div>
       <div class="preset-grid" style="margin-top:12px;">
-        <button data-preset="indigo">Indigo night</button>
-        <button data-preset="ember">Red ember</button>
-        <button data-preset="mono">Slate mono</button>
+        <button data-preset="indigo">Indigo Night</button>
+        <button data-preset="ember">Red Ember</button>
+        <button data-preset="mono">Slate Mono</button>
         <button data-preset="frost">Frost</button>
-        <button data-preset="bubble">Bubble / egg</button>
-        <button data-preset="crimson">Crimson glass</button>
+        <button data-preset="bubble">Bubble / Egg</button>
+        <button data-preset="crimson">Crimson Glass</button>
       </div>
     </div>
 
     <div class="section" id="artPresetsSection">
-      <div class="section-title">2.0 Art presets</div>
+      <div class="section-title">2.0 Art Presets</div>
       <div class="preset-grid">
         <button data-art-preset="blue">Blue Egg</button>
         <button data-art-preset="magenta">Cosmic Magenta</button>
@@ -109,16 +109,16 @@
     <div class="section-title">Shading</div>
     <div class="section-disabled-note" id="shadingDisabledNote">Not available for Apollonian Gasket.</div>
       <select id="shadingMode">
-        <option value="bands">Color bands (escape time)</option>
-        <option value="lit">3D lit — potential folds</option>
-        <option value="trap">3D lit — orbit-trap bubbles</option>
-        <option value="filigree">Gold filigree — orbit lines</option>
+        <option value="bands">Color Bands (Escape Time)</option>
+        <option value="lit">3D Lit — Potential Folds</option>
+        <option value="trap">3D Lit — Orbit-Trap Bubbles</option>
+        <option value="filigree">Gold Filigree — Orbit Lines</option>
       </select>
       <div id="trapControls" style="display:none; margin-top:12px;">
         <div class="row">
           <label for="trapShape">Orbit-trap shape</label>
           <select id="trapShape" style="width:150px;">
-            <option value="circle">Circle / sphere</option>
+            <option value="circle">Circle / Sphere</option>
             <option value="square">Square</option>
             <option value="diamond">Diamond</option>
             <option value="cross">Cross</option>
