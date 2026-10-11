@@ -436,3 +436,26 @@ input[type="range"]::-moz-range-thumb {
   background: #8b7cff;
   box-shadow: 0 0 0 2px rgba(139,124,255,.18), 0 0 8px rgba(139,124,255,.65);
 }
+
+/* Controls that do not apply to the selected fractal type remain visible but inert. */
+.section.is-disabled {
+  opacity: 0.42;
+}
+.section.is-disabled .section-title::before {
+  background: var(--ink-dim);
+}
+.section.is-disabled input,
+.section.is-disabled select,
+.section.is-disabled button {
+  cursor: not-allowed;
+}
+.section-disabled-note {
+  display: none;
+  color: var(--ink-dim);
+  font-size: 10px;
+  line-height: 1.4;
+  margin: -4px 0 12px;
+  padding: 7px 9px;
+  border-left: 2px solid var(--ink-dim);
+  background: rgba(255,255,255,0.025);
+}

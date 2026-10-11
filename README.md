@@ -1,54 +1,35 @@
-# Fractal Explorer 2.1.0
+# Fractal Explorer 2.1.3e
 
-A modular evolution of Fractal Explorer 1.8, retaining its original control panel, navigation, orbit-trap renderer, lighting controls, Julia/Mandelbrot family, and PNG export.
+## Changes in 2.1.3e
+- When **Golden Filigree** and **Circular Ring Trap** are both selected, use a Gemini-style orbit-trap renderer: track the minimum distance to the circular trap through the orbit and color both escaped and interior pixels using exponential glow plus a small escape-time contribution.
+- Other trap shapes continue using Fractal Explorer's existing Golden Filigree renderer; other shading modes are unchanged.
+- Circular Ring Trap frequency scales the trap-distance thickness while preserving the Gemini-style minimum-distance coloring approach.
+- This is an algorithmic adaptation of Gemini's orbit-trap path, not a wholesale replacement of the app or its UI. Browser visual testing is still required.
 
-## What's new in 2.1.0
-- Split the original single-file app into `index.html`, `css/main.css`, and `js/app.js`.
-- Added five editable art-direction presets: Blue Egg, Cosmic Magenta, Thorn Blue Lake, Golden Filigree, and Electric Indigo.
-- Added a Gold Filigree shading style intended for luminous, narrow contour-like bands.
-- Preserved the existing 1.8 controls and renderer as the foundation.
+## Changes in 2.1.3b
+
+- Fixes Circular Ring Trap so Trap Scale / Frequency changes contour density; radius controls the overall trap scale.
+
+## Changes in 2.1.3a
+
+- Adds a dedicated **Bubble & Trap Settings** section between Shading and Detail.
+- Adds Perfect Circles (Bubbles), Circular Ring Trap, Circular Grid, Concentric Rings, and Ortho Cross Lines trap styles for Gold filigree shading.
+- Fixes Golden Filigree preset initialization so Bubble & Trap controls and their displayed values update immediately.
+- Golden Filigree now selects Circular Ring Trap as its starting geometry.
+- Adds Trap Size / Radius, Bubble Glow & Softness, and Trap Scale / Frequency controls.
+- The section is active for Gold filigree shading and explains its availability when another shading mode is selected.
+- Preserves the existing Circle / Square / Diamond / Cross orbit-trap options and the working Apollonian Gasket controls.
 
 ## Run locally
-Because this uses a JavaScript file, run it from a local web server instead of opening `index.html` with `file://`. For example, from this directory:
+
+Keep the folder structure intact and serve the folder from a local web server, for example:
 
 ```bash
 python3 -m http.server 8000
 ```
 
-Then open `http://localhost:8000`. No build step or framework is required.
+Then open `http://localhost:8000`.
 
-## Notes
-This is an initial 2.0.1 foundation release. The Gemini project's Apollonian Gasket and Julia parameter pad are not yet integrated; they should be added as separate geometry/navigation modules after the current 1.8 behavior is validated. The filigree style is an initial procedural treatment, not a reproduction of the supplied reference images.
+## Validation status
 
-
-## 2.0.1
-
-- Fixed contrast for buttons, presets, dropdowns, labels, and native controls.
-- Added explicit dark color-scheme rules so native select menus remain readable.
-- Preserved the 2.0.0 layout and rendering behavior.
-- Added a small-screen layout fallback.
-
-
-## 2.1.0
-
-- Rebuilt range-slider tracks and thumbs with explicit WebKit and Firefox styling for improved visibility.
-- Fixed the primary export button cascade: the general button background rule no longer overrides the accent background.
-- Added distinct disabled and hover states for Save PNG, including a clear Rendering… state during export.
-- Kept the renderer, presets, layout, and export dimensions unchanged.
-
-
-## 2.1.0 patch
-- Keeps Save PNG clearly visible at rest and gives it a readable busy state.
-- Makes the render progress indicator thicker, brighter, and visible while rendering.
-- Improves range slider track and thumb contrast.
-
-
-## 2.1.0 — Zoom-box visibility
-- Raises the zoom-selection overlay above the fractal canvas with a brighter border and translucent fill.
-- Keeps drag updates active when the pointer leaves the canvas and constrains the selection to canvas bounds.
-- Uses the displayed canvas aspect ratio for the selection geometry.
-
-
-## 2.1.0
-
-Adds an Apollonian Gasket mode based on the Descartes circle-packing construction from the Gemini prototype, with recursion depth, stroke width, fill, shared palette, pan/zoom, and PNG export. Existing 2.0.4 rendering and interface fixes are retained.
+JavaScript syntax and ZIP integrity are checked. The new visual effects need hands-on browser testing; this is a test build, not a final release.

@@ -53,6 +53,11 @@
     autoIter: true,
     trapX: 0,
     trapY: 0,
+    trapShape: 'circle',
+    bubbleTrapShape: 'perfect',
+    bubbleTrapRadius: 0.5,
+    bubbleTrapGlow: 10,
+    bubbleTrapFrequency: 1,
     trapRadius: 1.1,
     trapAutoRadius: true,
     trapRepeats: 8,
@@ -212,6 +217,54 @@
   // ---- orbit trap field: tracks the closest approach of the orbit to a fixed trap
   // point. Level sets of "which iteration was closest" are literally arcs of circles
   // centered on the trap, which is what produces the overlapping-sphere "bubble" look.
+  function trapDistanceSquared(dx, dy){
+    // Gold filigree has its own trap geometry family. Keep the established
+    // Circle/Square/Diamond/Cross orbit-trap behavior for the 3D bubble mode.
+    if(state.shadingMode === 'filigree'){
+      const radius = Math.max(0.1, state.bubbleTrapRadius);
+      const frequency = Math.max(0.25, state.bubbleTrapFrequency);
+      const x = dx / radius, y = dy / radius;
+      const r = Math.sqrt(x*x + y*y);
+      let d;
+      switch(state.bubbleTrapShape){
+        case 'grid': {
+          const ring = Math.sin(r * Math.PI * frequency);
+          const angle = Math.sin(Math.atan2(y, x) * Math.max(4, Math.round(8 * frequency)));
+          d = Math.min(Math.abs(ring), Math.abs(angle) * 0.7) / (Math.PI * frequency);
+          break;
+        }
+        case 'ringtrap': {
+          // Circular Ring Trap: center the ring field on the selected radius, then
+          // use frequency to repeat contours around it. Radius controls the overall
+          // ring scale; frequency controls the spacing of the surrounding rings.
+          const ringOffset = r - 1;
+          const phase = ringOffset * Math.PI * frequency;
+          d = Math.abs(Math.sin(phase)) / (Math.PI * frequency);
+          break;
+        }
+        case 'rings':
+          d = Math.abs(Math.sin(r * Math.PI * frequency)) / (Math.PI * frequency);
+          break;
+        case 'crosslines': {
+          const gx = Math.abs(Math.sin(x * Math.PI * frequency));
+          const gy = Math.abs(Math.sin(y * Math.PI * frequency));
+          d = Math.min(gx, gy) / (Math.PI * frequency);
+          break;
+        }
+        default:
+          d = r;
+      }
+      return d*d;
+    }
+    const ax = Math.abs(dx), ay = Math.abs(dy);
+    switch(state.trapShape){
+      case 'square': { const d = Math.max(ax, ay); return d*d; }
+      case 'diamond': { const d = (ax + ay) / Math.SQRT2; return d*d; }
+      case 'cross': { const d = Math.min(ax, ay); return d*d; }
+      default: return dx*dx + dy*dy;
+    }
+  }
+
   function computeOrbitField(px, py, kind, jr, ji, trapX, trapY){
     let zr, zi, cr, ci;
     const isJuliaVar = (kind === 'julia');
@@ -237,7 +290,7 @@
     // seed the measurement with the starting point's own distance; for everything else,
     // leave it at Infinity since the loop is guaranteed to run at least once anyway (the
     // origin always starts within the bailout radius).
-    let minDist2 = isJuliaVar ? ((zr-trapX)*(zr-trapX) + (zi-trapY)*(zi-trapY)) : Infinity;
+    let minDist2 = isJuliaVar ? trapDistanceSquared(zr-trapX, zi-trapY) : Infinity;
     let minN = 0;
     while(n < maxIter && (zr2 + zi2) < 4){
       if(kind === 'burningship'){
@@ -255,7 +308,7 @@
       }
       zr2 = zr*zr; zi2 = zi*zi;
       const dxT = zr - trapX, dyT = zi - trapY;
-      const d2 = dxT*dxT + dyT*dyT;
+      const d2 = trapDistanceSquared(dxT, dyT);
       if(d2 < minDist2){ minDist2 = d2; minN = n+1; }
       n++;
     }
@@ -266,11 +319,106 @@
   function render(targetCanvas, targetCtx, tw, th, onDone){
     if(state.type === 'apollonian'){
       renderApollonianGasket(targetCtx, tw, th, onDone);
+    } else if(state.shadingMode === 'filigree' && state.bubbleTrapShape === 'ringtrap'){
+      // For this specific combination, use the Gemini-style orbit-trap coloring
+      // path instead of our usual height-field / bump-lighting Golden Filigree pass.
+      renderGeminiRingTrap(targetCtx, tw, th, onDone);
     } else if(state.shadingMode === 'trap' || state.shadingMode === 'filigree'){
       renderTrapField(targetCtx, tw, th, onDone);
     } else {
       renderStandard(targetCtx, tw, th, onDone);
     }
+  }
+
+  // ---- Gemini-style circular orbit-trap renderer ----
+  // Closely follows the source prototype's algorithm: track the minimum distance
+  // from each iterated z to a circular trap, map exp(-glow * dMin) plus a small
+  // escape-time contribution into a palette, and color interior points as well as
+  // escaped points. The frequency control is retained as a distance-thickness
+  // multiplier so it remains useful in this app's Circular Ring Trap mode.
+  function renderGeminiRingTrap(targetCtx, tw, th, onDone){
+    const token = ++renderToken;
+    progressBar.classList.add('is-active');
+    progressBar.style.width = '3%';
+    const imgData = targetCtx.createImageData(tw, th);
+    const data = imgData.data;
+    const palette = buildPaletteLinearFn();
+    const kind = state.type;
+    const maxIter = state.maxIter;
+    const jr = state.juliaRe, ji = state.juliaIm;
+    const trapX = state.trapX, trapY = state.trapY;
+    const trapRadius = Math.max(0.001, state.bubbleTrapRadius);
+    const glow = Math.max(0, state.bubbleTrapGlow);
+    const frequency = Math.max(0.25, state.bubbleTrapFrequency);
+    const scaleX = state.scale;
+    const scaleY = state.scale / (tw / th);
+    const xmin = state.cx - scaleX/2, xmax = state.cx + scaleX/2;
+    const ymin = state.cy - scaleY/2, ymax = state.cy + scaleY/2;
+    const rowsPerChunk = Math.max(1, Math.floor(th / 60));
+    const t0 = performance.now();
+    let row = 0;
+
+    function chunk(){
+      if(token !== renderToken) return;
+      const rowEnd = Math.min(th, row + rowsPerChunk);
+      for(let py = row; py < rowEnd; py++){
+        const y0 = ymax - (py / Math.max(1, th-1)) * (ymax-ymin);
+        for(let px = 0; px < tw; px++){
+          const x0 = xmin + (px / Math.max(1, tw-1)) * (xmax-xmin);
+          let x = kind === 'julia' ? x0 : 0;
+          let y = kind === 'julia' ? y0 : 0;
+          const cx = kind === 'julia' ? jr : x0;
+          const cy = kind === 'julia' ? ji : y0;
+          let i = 0;
+          let dMin = 1e10;
+          const escapeRadiusSq = 32.0; // same wider bailout used by Gemini's renderer
+          while(i < maxIter){
+            const x2 = x*x, y2 = y*y;
+            if(x2+y2 > escapeRadiusSq) break;
+            let nx, ny;
+            if(kind === 'burningship'){
+              nx = x2-y2+cx;
+              ny = 2*Math.abs(x*y)+cy;
+            } else if(kind === 'tricorn'){
+              nx = x2-y2+cx;
+              ny = -2*x*y+cy;
+            } else {
+              nx = x2-y2+cx;
+              ny = 2*x*y+cy;
+            }
+            x = nx; y = ny;
+            const dx = x-trapX, dy = y-trapY;
+            // Gemini's circle trap is |z - trapCenter| - radius. Frequency scales
+            // the distance field's width without changing the underlying orbit.
+            const d = Math.abs(Math.sqrt(dx*dx+dy*dy)-trapRadius) * frequency;
+            if(d < dMin) dMin = d;
+            i++;
+          }
+          const factor = Math.exp(-glow*dMin);
+          const escapeBlend = i < maxIter ? i/maxIter : 0;
+          const t = Math.max(0, Math.min(1, factor*0.88 + escapeBlend*0.12));
+          const color = palette(t);
+          const idx = (py*tw+px)*4;
+          data[idx] = Math.round(color[0]);
+          data[idx+1] = Math.round(color[1]);
+          data[idx+2] = Math.round(color[2]);
+          data[idx+3] = 255;
+        }
+      }
+      row = rowEnd;
+      progressBar.style.width = (row/th*95) + '%';
+      if(row < th){
+        requestAnimationFrame(chunk);
+      } else {
+        if(token !== renderToken) return;
+        targetCtx.putImageData(imgData, 0, 0);
+        progressBar.style.width = '0%';
+        progressBar.classList.remove('is-active');
+        document.getElementById('renderTime').textContent = `rendered in ${(performance.now()-t0).toFixed(0)}ms`;
+        if(onDone) onDone();
+      }
+    }
+    requestAnimationFrame(chunk);
   }
 
   // ---- Apollonian Gasket: Descartes circle packing ported from the Gemini prototype ----
@@ -287,8 +435,8 @@
     const baseRadius = Math.min(tw, th) * 0.46;
     const zoom = 3.2 / Math.max(1e-9, state.scale);
     const outerRadius = baseRadius * Math.min(zoom, 1000);
-    const sx = tw / 2 + (state.cx + 0.5) * (tw / state.scale);
-    const sy = th / 2 - state.cy * (th / state.scale);
+    const sx = tw / 2 + (-0.5 - state.cx) * (tw / state.scale);
+    const sy = th / 2 + state.cy * (th / state.scale);
     const c0 = {x:0, y:0, r:-outerRadius, k:-1/outerRadius, depth:0};
     const rInner = outerRadius * (2 * Math.sqrt(3) - 3);
     const dDist = outerRadius - rInner;
@@ -305,8 +453,8 @@
       if(!Number.isFinite(k) || Math.abs(k)<1e-12) return;
       const r = 1/k;
       if(!Number.isFinite(r) || Math.abs(r) < minRadius) return;
-      const zkx = 2*(a.x*a.k+b.x*b.k+c.x*c.k-opposite.x*opposite.k);
-      const zky = 2*(a.y*a.k+b.y*b.k+c.y*c.k-opposite.y*opposite.k);
+      const zkx = 2*(a.x*a.k+b.x*b.k+c.x*c.k) - opposite.x*opposite.k;
+      const zky = 2*(a.y*a.k+b.y*b.k+c.y*c.k) - opposite.y*opposite.k;
       const x = zkx/k, y = zky/k;
       if(!Number.isFinite(x) || !Number.isFinite(y)) return;
       const next = makeCircle(x,y,r,depth);
@@ -452,7 +600,7 @@
       const interiorRgb = hexToRgb(state.interior);
       const light = buildLight();
       const lightNorm = Math.sqrt(light.lx*light.lx + light.ly*light.ly + light.h*light.h) || 1;
-      const bump = state.trapBump;
+      const bump = state.shadingMode === 'filigree' ? state.bubbleTrapGlow : state.trapBump;
       const trapCycle = state.trapCycle;
       const stepped2 = state.trapBandStyle === 'stepped2';
       const stepped3 = state.trapBandStyle === 'stepped3';
@@ -615,9 +763,23 @@
   const fractalTypeSel = document.getElementById('fractalType');
   const juliaControls = document.getElementById('juliaControls');
   const gasketControls = document.getElementById('gasketControls');
+  const shadingSection = document.getElementById('shadingSection');
+  const detailSection = document.getElementById('detailSection');
+  function setSectionDisabled(section, disabled, noteId){
+    section.classList.toggle('is-disabled', disabled);
+    section.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    section.querySelectorAll('input, select, button, textarea').forEach(control => {
+      control.disabled = disabled;
+    });
+    const note = document.getElementById(noteId);
+    if(note) note.style.display = disabled ? 'block' : 'none';
+  }
   function syncTypeControls(){
+    const isGasket = state.type === 'apollonian';
     juliaControls.style.display = state.type === 'julia' ? 'block' : 'none';
-    gasketControls.style.display = state.type === 'apollonian' ? 'block' : 'none';
+    gasketControls.style.display = isGasket ? 'block' : 'none';
+    setSectionDisabled(shadingSection, isGasket, 'shadingDisabledNote');
+    setSectionDisabled(detailSection, isGasket, 'detailDisabledNote');
   }
   fractalTypeSel.addEventListener('change', () => {
     state.type = fractalTypeSel.value;
@@ -658,7 +820,22 @@
   const shadingModeSel = document.getElementById('shadingMode');
   const litControls = document.getElementById('litControls');
   const trapControls = document.getElementById('trapControls');
+  const trapShapeSel = document.getElementById('trapShape');
+  if(trapShapeSel){
+    trapShapeSel.value = state.trapShape;
+    trapShapeSel.addEventListener('change', () => { state.trapShape = trapShapeSel.value; renderMain(); });
+  }
   const cycleScaleRow = document.getElementById('cycleScale').closest('.row');
+  const bubbleTrapSection = document.getElementById('bubbleTrapSection');
+  const bubbleTrapControls = document.getElementById('bubbleTrapControls');
+  const bubbleTrapDisabledNote = document.getElementById('bubbleTrapDisabledNote');
+  function updateBubbleTrapVisibility(){
+    const active = state.shadingMode === 'filigree';
+    bubbleTrapControls.style.display = active ? 'block' : 'none';
+    bubbleTrapDisabledNote.style.display = active ? 'none' : 'block';
+    bubbleTrapSection.classList.toggle('section-disabled', !active);
+  }
+  updateBubbleTrapVisibility();
   shadingModeSel.addEventListener('change', () => {
     state.shadingMode = shadingModeSel.value;
     const isLit = state.shadingMode === 'lit';
@@ -666,8 +843,22 @@
     litControls.style.display = (isLit || isTrap) ? 'block' : 'none';
     trapControls.style.display = isTrap ? 'block' : 'none';
     cycleScaleRow.style.display = (isLit || isTrap) ? 'none' : 'flex';
+    updateBubbleTrapVisibility();
     renderMain();
   });
+  const bubbleTrapShapeSel = document.getElementById('bubbleTrapShape');
+  bubbleTrapShapeSel.addEventListener('change', () => { state.bubbleTrapShape = bubbleTrapShapeSel.value; renderMain(); });
+  function bubbleTrapInput(id, key, outputId, decimals){
+    const input = document.getElementById(id), output = document.getElementById(outputId);
+    input.addEventListener('input', e => {
+      state[key] = parseFloat(e.target.value);
+      output.value = state[key].toFixed(decimals);
+      renderMain();
+    });
+  }
+  bubbleTrapInput('bubbleTrapRadius', 'bubbleTrapRadius', 'bubbleTrapRadiusValue', 2);
+  bubbleTrapInput('bubbleTrapGlow', 'bubbleTrapGlow', 'bubbleTrapGlowValue', 1);
+  bubbleTrapInput('bubbleTrapFrequency', 'bubbleTrapFrequency', 'bubbleTrapFrequencyValue', 2);
 
   function lightInput(id, key, isInt){
     document.getElementById(id).addEventListener('input', e => {
@@ -784,15 +975,16 @@
   }
 
   // ---- drag-to-zoom ----
-  let dragging = false, dragStart = null;
+  let dragging = false, dragStart = null, dragCurrent = null;
   canvas.addEventListener('mousedown', e => {
     if(e.button !== 0) return;
-    dragging = true;
     const rect = canvas.getBoundingClientRect();
+    dragging = true;
     dragStart = {
       x: Math.max(0, Math.min(rect.width, e.clientX - rect.left)),
       y: Math.max(0, Math.min(rect.height, e.clientY - rect.top))
     };
+    dragCurrent = {...dragStart};
     selectBox.style.zIndex = '20';
     selectBox.style.left = dragStart.x + 'px';
     selectBox.style.top = dragStart.y + 'px';
@@ -806,43 +998,41 @@
     const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
     const [re, im] = pixelToComplex(e.clientX, e.clientY);
     document.getElementById('roCursor').textContent = `${re.toFixed(6)}, ${im.toFixed(6)}`;
-
-    if(dragging && dragStart){
-      // Keep the selection overlay above the canvas and constrain it to the
-      // canvas bounds while preserving the canvas aspect ratio.
-      const boundedX = Math.max(0, Math.min(rect.width, cx));
-      const boundedY = Math.max(0, Math.min(rect.height, cy));
-      let dx = boundedX - dragStart.x;
-      let dy = dx / (rect.width / rect.height);
-      const left = dx >= 0 ? dragStart.x : dragStart.x + dx;
-      const top = dy >= 0 ? dragStart.y : dragStart.y + dy;
-      selectBox.style.left = left + 'px';
-      selectBox.style.top = top + 'px';
-      selectBox.style.width = Math.abs(dx) + 'px';
-      selectBox.style.height = Math.abs(dy) + 'px';
-    }
+    if(!dragging || !dragStart) return;
+    const boundedX = Math.max(0, Math.min(rect.width, cx));
+    const boundedY = Math.max(0, Math.min(rect.height, cy));
+    dragCurrent = {x: boundedX, y: boundedY};
+    // Keep the box inside the canvas and use a real rectangle in either drag direction.
+    const left = Math.min(dragStart.x, boundedX);
+    const top = Math.min(dragStart.y, boundedY);
+    selectBox.style.left = left + 'px';
+    selectBox.style.top = top + 'px';
+    selectBox.style.width = Math.abs(boundedX - dragStart.x) + 'px';
+    selectBox.style.height = Math.abs(boundedY - dragStart.y) + 'px';
   });
 
   window.addEventListener('mouseup', e => {
-    if(!dragging) return;
+    if(!dragging || !dragStart) return;
     dragging = false;
     selectBox.style.display = 'none';
     const rect = canvas.getBoundingClientRect();
-    const endX = e.clientX - rect.left, endY = e.clientY - rect.top;
-    let dx = Math.max(-rect.width, Math.min(rect.width, endX)) - dragStart.x;
-    if(Math.abs(dx) < 6){ dragStart = null; return; } // treat as click, ignore
-    let dy = dx / (rect.width / rect.height);
-    const x1 = dx >= 0 ? dragStart.x : dragStart.x + dx;
-    const y1 = dy >= 0 ? dragStart.y : dragStart.y + dy;
-    const x2 = x1 + Math.abs(dx), y2 = y1 + Math.abs(dy);
+    const endX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const endY = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+    const left = Math.min(dragStart.x, endX), right = Math.max(dragStart.x, endX);
+    const top = Math.min(dragStart.y, endY), bottom = Math.max(dragStart.y, endY);
+    const boxW = right - left, boxH = bottom - top;
+    if(boxW < 8 || boxH < 8){ dragStart = null; dragCurrent = null; return; }
 
-    const [reA, imA] = pixelToComplex(rect.left + x1, rect.top + y1);
-    const [reB, imB] = pixelToComplex(rect.left + x2, rect.top + y2);
-
+    // Use both selected corners. pixelToComplex handles the inverted screen Y axis.
+    const [reA, imA] = pixelToComplex(rect.left + left, rect.top + top);
+    const [reB, imB] = pixelToComplex(rect.left + right, rect.top + bottom);
+    const newScaleX = Math.abs(reB - reA);
+    const newScaleY = Math.abs(imA - imB) * ASPECT;
     state.cx = (reA + reB) / 2;
     state.cy = (imA + imB) / 2;
-    state.scale = Math.abs(reB - reA);
+    state.scale = Math.max(1e-12, Math.max(newScaleX, newScaleY));
     dragStart = null;
+    dragCurrent = null;
     renderMain();
   });
 
@@ -916,7 +1106,7 @@
     blue: { colors:['#061525','#17618b','#b5f0ff'], interior:'#02070b', bg:'#5c91b4', shadingMode:'trap', trapX:0, trapY:0, trapBump:95, trapBandWarp:0.35, lightAngle:135, lightHeight:1.5, lightAmbient:0.08, lightSpec:0.68, lightShininess:9, trapColorSource:'sequence', trapCycle:true, trapRepeats:12 },
     magenta: { colors:['#08040d','#92245f','#6ac8e8'], interior:'#020207', bg:'#050508', shadingMode:'trap', trapBump:115, trapBandWarp:0.55, lightAngle:140, lightHeight:1.3, lightAmbient:0.04, lightSpec:0.75, lightShininess:8, trapColorSource:'sequence', trapCycle:true, trapRepeats:16 },
     lake: { colors:['#030a20','#123d8c','#e4eaff'], interior:'#020617', bg:'#174fbd', shadingMode:'trap', trapBump:55, trapBandWarp:0.1, lightAngle:145, lightHeight:1.8, lightAmbient:0.18, lightSpec:0.82, lightShininess:12, trapColorSource:'distance', trapCycle:false },
-    gold: { colors:['#30170b','#c28a54','#fff0c9'], interior:'#1b0b04', bg:'#180b05', shadingMode:'filigree', trapBump:32, trapBandWarp:0.18, lightAngle:130, lightHeight:1.2, lightAmbient:0.22, lightSpec:0.35, lightShininess:5, trapColorSource:'sequence', trapCycle:true, trapRepeats:20 },
+    gold: { colors:['#30170b','#c28a54','#fff0c9'], interior:'#1b0b04', bg:'#180b05', shadingMode:'filigree', bubbleTrapShape:'ringtrap', bubbleTrapRadius:0.5, bubbleTrapGlow:10, bubbleTrapFrequency:1, trapBump:32, trapBandWarp:0.18, lightAngle:130, lightHeight:1.2, lightAmbient:0.22, lightSpec:0.35, lightShininess:5, trapColorSource:'sequence', trapCycle:true, trapRepeats:20 },
     indigo: { colors:['#08071b','#3935df','#d4ccff'], interior:'#03020a', bg:'#07051b', shadingMode:'lit', lightAngle:135, lightHeight:1.7, lightAmbient:0.08, lightSpec:0.9, lightShininess:16 }
   };
   document.querySelectorAll('[data-art-preset]').forEach(button => button.addEventListener('click', () => {
@@ -924,13 +1114,16 @@
     Object.assign(state, p);
     ['colorA','colorB','colorC'].forEach((id,i)=>document.getElementById(id).value=state.colors[i]);
     document.getElementById('colorInterior').value=state.interior; document.getElementById('colorBg').value=state.bg;
-    ['trapX','trapY','trapBump','trapBandWarp','lightAngle','lightHeight','lightAmbient','lightSpec','lightShininess','trapRepeats'].forEach(id=>{if(state[id]!==undefined){const el=document.getElementById(id); if(el) el.value=state[id];}});
+    ['trapX','trapY','trapBump','trapBandWarp','lightAngle','lightHeight','lightAmbient','lightSpec','lightShininess','trapRepeats','bubbleTrapRadius','bubbleTrapGlow','bubbleTrapFrequency'].forEach(id=>{if(state[id]!==undefined){const el=document.getElementById(id); if(el) el.value=state[id];}});
+    ['bubbleTrapRadius','bubbleTrapGlow','bubbleTrapFrequency'].forEach((key)=>{const out=document.getElementById(key+'Value'); if(out) out.value=Number(state[key]).toFixed(key==='bubbleTrapGlow'?1:2);});
+    const bubbleShapeSel=document.getElementById('bubbleTrapShape'); if(bubbleShapeSel){bubbleShapeSel.value=state.bubbleTrapShape;}
     document.getElementById('trapCycle').checked=!!state.trapCycle;
     document.getElementById('trapColorSource').value=state.trapColorSource||'distance';
     shadingModeSel.value=state.shadingMode;
     const isLit=state.shadingMode==='lit'||state.shadingMode==='trap'||state.shadingMode==='filigree';
     const isTrap=state.shadingMode==='trap'||state.shadingMode==='filigree';
     litControls.style.display=isLit?'block':'none'; trapControls.style.display=isTrap?'block':'none'; cycleScaleRow.style.display=isLit?'none':'flex';
+    updateBubbleTrapVisibility();
     updatePalettePreview(); renderMain();
   }));
 

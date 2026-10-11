@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fractal Explorer 2.1.0</title>
+<title>Fractal Explorer 2.1.3e</title>
 <link rel="stylesheet" href="css/main.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
 <header>
   <div class="brand">
     <span class="mark"></span>
-    <h1>Fractal Explorer <span class="version-chip">2.1.0</span></h1>
+    <h1>Fractal Explorer <span class="version-chip">2.1.3e</span></h1>
     <span class="sub">/ escape-time renderer</span>
   </div>
   <div class="status" id="statusLine">iter <b id="statIter">300</b> &nbsp;·&nbsp; zoom <b id="statZoom">1.0×</b></div>
@@ -93,8 +93,7 @@
       </div>
     </div>
 
-    <div class="section">
-      <div class="section" id="artPresetsSection">
+    <div class="section" id="artPresetsSection">
       <div class="section-title">2.0 Art presets</div>
       <div class="preset-grid">
         <button data-art-preset="blue">Blue Egg</button>
@@ -106,7 +105,9 @@
       <div class="hint">Presets are starting points; every control remains editable.</div>
     </div>
 
+    <div class="section" id="shadingSection">
     <div class="section-title">Shading</div>
+    <div class="section-disabled-note" id="shadingDisabledNote">Not available for Apollonian Gasket.</div>
       <select id="shadingMode">
         <option value="bands">Color bands (escape time)</option>
         <option value="lit">3D lit — potential folds</option>
@@ -114,6 +115,15 @@
         <option value="filigree">Gold filigree — orbit lines</option>
       </select>
       <div id="trapControls" style="display:none; margin-top:12px;">
+        <div class="row">
+          <label for="trapShape">Orbit-trap shape</label>
+          <select id="trapShape" style="width:150px;">
+            <option value="circle">Circle / sphere</option>
+            <option value="square">Square</option>
+            <option value="diamond">Diamond</option>
+            <option value="cross">Cross</option>
+          </select>
+        </div>
         <div class="row">
           <label>Trap X</label>
           <input type="range" id="trapX" min="-2" max="2" step="0.01" value="0">
@@ -192,8 +202,42 @@
       </div>
     </div>
 
-    <div class="section">
+    <div class="section" id="bubbleTrapSection">
+      <div class="section-title">Bubble &amp; Trap Settings</div>
+      <div class="section-disabled-note" id="bubbleTrapDisabledNote">Available with Gold filigree — orbit lines shading.</div>
+      <div id="bubbleTrapControls" style="margin-top:12px;">
+        <div class="row">
+          <label for="bubbleTrapShape">Trap Shape</label>
+          <select id="bubbleTrapShape" style="width:170px;">
+            <option value="perfect">Perfect Circles (Bubbles)</option>
+            <option value="ringtrap">Circular Ring Trap</option>
+            <option value="grid">Circular Grid</option>
+            <option value="rings">Concentric Rings</option>
+            <option value="crosslines">Ortho Cross Lines</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="bubbleTrapRadius">Trap Size / Radius</label>
+          <input type="range" id="bubbleTrapRadius" min="0.1" max="2" step="0.01" value="0.5">
+          <output id="bubbleTrapRadiusValue">0.50</output>
+        </div>
+        <div class="row">
+          <label for="bubbleTrapGlow">Bubble Glow &amp; Softness</label>
+          <input type="range" id="bubbleTrapGlow" min="1" max="30" step="0.5" value="10">
+          <output id="bubbleTrapGlowValue">10.0</output>
+        </div>
+        <div class="row">
+          <label for="bubbleTrapFrequency">Trap Scale / Frequency</label>
+          <input type="range" id="bubbleTrapFrequency" min="0.25" max="4" step="0.05" value="1">
+          <output id="bubbleTrapFrequencyValue">1.00</output>
+        </div>
+        <div class="hint">These controls shape the luminous orbit-trap pattern used by Gold filigree. Switch to another shading mode to return to the standard orbit-trap controls.</div>
+      </div>
+    </div>
+
+    <div class="section" id="detailSection">
       <div class="section-title">Detail</div>
+      <div class="section-disabled-note" id="detailDisabledNote">Not available for Apollonian Gasket.</div>
       <div class="row">
         <label>Auto iterations</label>
         <input type="checkbox" id="autoIter" checked>
