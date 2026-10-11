@@ -26,7 +26,7 @@
   const progressBar = document.getElementById('progress');
   const canvasWrap = document.getElementById('canvasWrap');
 
-  const W = canvas.width, H = canvas.height;
+  let W = canvas.width, H = canvas.height;
   const ASPECT = W / H;
 
   // ---- state ----
@@ -66,7 +66,11 @@
     trapBandStyle: 'smooth',
     trapHueShift: 0,
     trapBandWarp: 0,
-    trapColorSource: 'distance'
+    trapColorSource: 'distance',
+    laceGold: '#e2a93b', laceSilver: '#bfc7d1', laceThick: 1, laceDensity: 3,
+    laceSpines: 8, laceGlow: 12, laceWarp: 0, ss: 1,
+    gradient: ['#05121f','#0b5f8a','#2fb6d6','#c8f4ff','#1a0b05','#8a2a08','#ff7a1a','#ffd27a'],
+    reliefCycle: 24, reliefBump: 5, reliefStripe: 0.35, portrait: false
   };
 
   let renderToken = 0; // increments to cancel stale renders
@@ -316,9 +320,31 @@
   }
 
   // ---- render dispatcher ----
+  // Supersample cap: keeps the hi-res buffer under ~8M pixels so big exports don't exhaust memory.
+  function effectiveSS(tw, th){ return Math.max(1, Math.min(state.ss, Math.floor(Math.sqrt(8e6 / (tw*th))))); }
+  let ssFactor = 1;
+  // Global supersampling: render at ss× size with the unchanged renderers, then average down.
+  // Lace/Relief do their own internal supersampling and the Gasket is vector, so they skip this.
   function render(targetCanvas, targetCtx, tw, th, onDone){
+    const own = state.type === 'apollonian' || state.shadingMode === 'lace' || state.shadingMode === 'relief';
+    const ss = own ? 1 : effectiveSS(tw, th);
+    ssFactor = ss;
+    if(ss <= 1){ renderDispatch(targetCanvas, targetCtx, tw, th, onDone); return; }
+    const hi = document.createElement('canvas'); hi.width = tw*ss; hi.height = th*ss;
+    renderDispatch(hi, hi.getContext('2d'), tw*ss, th*ss, () => {
+      ssFactor = 1;
+      targetCtx.save(); targetCtx.imageSmoothingEnabled = true; targetCtx.imageSmoothingQuality = 'high';
+      targetCtx.clearRect(0, 0, tw, th); targetCtx.drawImage(hi, 0, 0, tw, th); targetCtx.restore();
+      if(onDone) onDone();
+    });
+  }
+  function renderDispatch(targetCanvas, targetCtx, tw, th, onDone){
     if(state.type === 'apollonian'){
       renderApollonianGasket(targetCtx, tw, th, onDone);
+    } else if(state.shadingMode === 'relief'){
+      renderRelief(targetCtx, tw, th, onDone);
+    } else if(state.shadingMode === 'lace'){
+      renderLace(targetCtx, tw, th, onDone);
     } else if(state.shadingMode === 'filigree' && state.bubbleTrapShape === 'ringtrap'){
       // For this specific combination, use the Gemini-style orbit-trap coloring
       // path instead of our usual height-field / bump-lighting Golden Filigree pass.
@@ -689,7 +715,7 @@
       const interiorRgb = hexToRgb(state.interior);
       const light = buildLight();
       const lightNorm = Math.sqrt(light.lx*light.lx + light.ly*light.ly + light.h*light.h) || 1;
-      const bump = state.shadingMode === 'filigree' ? state.bubbleTrapGlow : state.trapBump;
+      const bump = (state.shadingMode === 'filigree' ? state.bubbleTrapGlow : state.trapBump) * ssFactor;   // neighbours are 1/ss as far apart when supersampled
       const trapCycle = state.trapCycle;
       const stepped2 = state.trapBandStyle === 'stepped2';
       const stepped3 = state.trapBandStyle === 'stepped3';
@@ -819,6 +845,236 @@
     requestAnimationFrame(chunk1);
   }
 
+  // ---- Ornate Lace: distance-estimated threads + N-fold star trap + gold/silver metals ----
+  // laceKernel is self-contained so it runs in a Web Worker (Blob) or, as a fallback, on the main thread.
+  function laceKernel(t){
+    const w = t.w, out = new Float32Array((t.y1 - t.y0) * w * 4);
+    const tw = t.warp * 1.2, tk = Math.sqrt(1 + tw*tw), P = 1.4;
+    const julia = t.kind === 'julia', add = julia ? 0 : 1, sg = t.kind === 'tricorn' ? -2 : 2;
+    const fade = 1 / (t.span * 0.15), half = t.spines * 0.5, sigma = 0.05 * t.thick + 0.002;
+    let o = 0;
+    for(let y = t.y0; y < t.y1; y++){
+      for(let x = 0; x < w; x++, o += 4){
+        let px = t.xmin + x * t.dx, py = t.ymax - y * t.dx, k = 1;
+        if(t.warp > 0){
+          const qx = px - t.cx, qy = py - t.cy, r = Math.sqrt(qx*qx + qy*qy) + 1e-300;
+          const u = Math.log(r / t.ws), ang = Math.atan2(qy, qx) + tw * u;
+          let m = ((u / P) % 2 + 2) % 2; if(m > 1) m = 2 - m;
+          const rho = t.ws * Math.exp((m - 1) * P);
+          px = t.cx + rho * Math.cos(ang); py = t.cy + rho * Math.sin(ang);
+          k = rho / r * tk;
+        }
+        let zr = julia ? px : 0, zi = julia ? py : 0, cr = julia ? t.jr : px, ci = julia ? t.ji : py;
+        let dr = julia ? 1 : 0, di = 0, n = 0, zr2 = zr*zr, zi2 = zi*zi, sd = 1e9;
+        while(n < t.maxIter && zr2 + zi2 < 1e4){
+          const ai = sg < 0 ? -zi : zi, bi = sg < 0 ? -di : di;
+          const ndr = 2 * (zr*dr - ai*bi) + add, ndi = 2 * (zr*bi + ai*dr);
+          dr = ndr; di = ndi;
+          const nzi = sg * zr * zi + ci;
+          zr = zr2 - zi2 + cr; zi = nzi; zr2 = zr*zr; zi2 = zi*zi; n++;
+          if(half > 0 && n <= 40){
+            const sv = Math.sqrt(zr2 + zi2) * Math.abs(Math.sin(half * Math.atan2(zi, zr)));
+            if(sv < sd) sd = sv;
+          }
+        }
+        if(n >= t.maxIter){ out[o+3] = 1; continue; }
+        const r2 = zr2 + zi2;
+        let d = 0.25 * Math.sqrt(r2) * Math.log(r2) / (Math.sqrt(dr*dr + di*di) + 1e-300) / k;
+        if(!(d > 1e-300)) d = 1e-300;
+        const ph = Math.log(d) * t.dens, nr = Math.round(ph), e = ph - nr;
+        const soft = Math.min(1, 2 * d * sigma / (t.dens * t.dx));   // fade sub-pixel ridges (anti-moire)
+        const att = 1 / (1 + d * fade);
+        const ridge = Math.exp(-(e/sigma) * (e/sigma)) * soft * att * 0.9;
+        const edge = Math.exp(-Math.pow(d / (t.dx * 1.2 * t.thick), 2));
+        out[o] = Math.max(ridge, edge);
+        out[o+1] = half > 0 ? Math.pow(Math.exp(-t.glow * sd), 3) * att * att * Math.min(1, d / (t.dx * 12)) * 0.6 : 0;   // gated near the boundary to avoid speckle
+        out[o+2] = ((nr % 2) + 2) % 2;
+      }
+    }
+    return { buf: out };
+  }
+
+  let laceWorkers = null, laceWorkersFailed = false, laceTaskId = 0;
+  function getLaceWorkers(){
+    if(laceWorkersFailed || typeof Worker === 'undefined') return null;
+    if(laceWorkers) return laceWorkers;
+    try{
+      const src = 'const K=' + laceKernel.toString() + ';const R=' + reliefKernel.toString() + ';self.onmessage=e=>{const r=(e.data.mode==="relief"?R:K)(e.data);self.postMessage({id:e.data.id,buf:r.buf},[r.buf.buffer]);};';
+      const url = URL.createObjectURL(new Blob([src], {type:'text/javascript'}));
+      const n = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1));
+      laceWorkers = Array.from({length:n}, () => new Worker(url));
+    } catch(err){ laceWorkersFailed = true; laceWorkers = null; }
+    return laceWorkers;
+  }
+  function runLaceTask(wk, task){
+    return new Promise(resolve => {
+      if(!wk){ setTimeout(() => resolve((task.mode === 'relief' ? reliefKernel : laceKernel)(task)), 0); return; }
+      task.id = ++laceTaskId;
+      wk.onmessage = e => { if(e.data.id === task.id) resolve(e.data); };   // ignore stale results
+      wk.onerror = () => { laceWorkersFailed = true; laceWorkers = null; resolve((task.mode === 'relief' ? reliefKernel : laceKernel)(task)); };
+      wk.postMessage(task);
+    });
+  }
+
+  function laceShade(buf, W, Hh, ss, tw, th, data){
+    const gold = hexToRgb(state.laceGold), silver = hexToRgb(state.laceSilver);
+    const ground = hexToRgb(state.bg), inter = hexToRgb(state.interior);
+    const L = buildLight(), ln = Math.sqrt(L.lx*L.lx + L.ly*L.ly + L.h*L.h) || 1;
+    const hg = i => buf[i*4] * 0.7 + buf[i*4+1] * 0.5, bump = 1.6, inv = 1 / (ss*ss);
+    for(let oy = 0; oy < th; oy++) for(let ox = 0; ox < tw; ox++){
+      let R = 0, G = 0, B = 0;
+      for(let sy = 0; sy < ss; sy++){
+        const y = oy*ss + sy, yu = y > 0 ? y-1 : y, yd = y < Hh-1 ? y+1 : y;
+        for(let sx = 0; sx < ss; sx++){
+          const x = ox*ss + sx, i = y*W + x, j = i*4;
+          if(buf[j+3] > 0){ R += inter[0]; G += inter[1]; B += inter[2]; continue; }
+          const xl = x > 0 ? x-1 : x, xr = x < W-1 ? x+1 : x;
+          const nx = -(hg(y*W+xr) - hg(y*W+xl)) * bump, ny = -(hg(yd*W+x) - hg(yu*W+x)) * bump;
+          const nl = Math.sqrt(nx*nx + ny*ny + 1);
+          const dif = Math.max(0, Math.min(1, (nx/nl*L.lx + ny/nl*L.ly + L.h/nl) / ln));
+          const shade = L.ambient + (1 - L.ambient) * dif, spec = Math.pow(dif, L.shininess) * L.specStrength;
+          const a = Math.min(1, buf[j]), s = Math.min(1, buf[j+1]), mc = buf[j+2] > 0.5 ? silver : gold;
+          const hot = s*s*s*70;
+          let r = ground[0]*(1-a) + mc[0]*shade*a + gold[0]*s*(0.5+0.5*shade) + hot;
+          let g = ground[1]*(1-a) + mc[1]*shade*a + gold[1]*s*(0.5+0.5*shade) + hot;
+          let b = ground[2]*(1-a) + mc[2]*shade*a + gold[2]*s*(0.5+0.5*shade) + hot*0.8;
+          r += spec*a*(255-Math.min(255,r)); g += spec*a*(255-Math.min(255,g)); b += spec*a*(255-Math.min(255,b));
+          R += Math.min(255,r); G += Math.min(255,g); B += Math.min(255,b);
+        }
+      }
+      const k = (oy*tw + ox) * 4;
+      data[k] = R*inv; data[k+1] = G*inv; data[k+2] = B*inv; data[k+3] = 255;
+    }
+  }
+
+  async function renderLace(targetCtx, tw, th, onDone){
+    const token = ++renderToken, t0 = performance.now();
+    progressBar.classList.add('is-active'); progressBar.style.width = '3%';
+    // Cap the supersampled buffer (~8M px) so large exports don't exhaust memory.
+    const ss = effectiveSS(tw, th);
+    const W = tw*ss, Hh = th*ss, buf = new Float32Array(W*Hh*4);
+    const base = {
+      w: W, xmin: state.cx - state.scale/2, ymax: state.cy + state.scale/(tw/th)/2, dx: state.scale / W,
+      kind: state.type, jr: state.juliaRe, ji: state.juliaIm, maxIter: state.maxIter,
+      spines: state.laceSpines, glow: state.laceGlow, dens: state.laceDensity, thick: state.laceThick,
+      warp: state.laceWarp, cx: state.cx, cy: state.cy, ws: state.scale * 0.35, span: state.scale
+    };
+    const pool = getLaceWorkers(), lanes = pool || [null];
+    let nextRow = 0, doneRows = 0;
+    async function lane(wk){
+      while(token === renderToken && nextRow < Hh){
+        const y0 = nextRow, y1 = Math.min(Hh, y0 + 16); nextRow = y1;
+        const res = await runLaceTask(wk, Object.assign({y0, y1}, base));
+        if(token !== renderToken) return;
+        buf.set(res.buf, y0 * W * 4);
+        doneRows += y1 - y0;
+        progressBar.style.width = (doneRows / Hh * 90) + '%';
+      }
+    }
+    await Promise.all(lanes.map(lane));
+    if(token !== renderToken) return;
+    const img = targetCtx.createImageData(tw, th);
+    laceShade(buf, W, Hh, ss, tw, th, img.data);
+    targetCtx.putImageData(img, 0, 0);
+    progressBar.style.width = '0%'; progressBar.classList.remove('is-active');
+    document.getElementById('renderTime').textContent = `lace · ${ss}× · ${pool ? pool.length + ' workers' : 'main thread'} · ${(performance.now()-t0).toFixed(0)}ms`;
+    if(onDone) onDone();
+  }
+
+  // ---- Glossy Relief: smooth escape time -> cyclic multi-stop gradient, lit as polished ribs ----
+  function reliefKernel(t){
+    const w = t.w, out = new Float32Array((t.y1 - t.y0) * w * 4);
+    const julia = t.kind === 'julia', sg = t.kind === 'tricorn' ? -2 : 2;
+    let o = 0;
+    for(let y = t.y0; y < t.y1; y++) for(let x = 0; x < w; x++, o += 4){
+      const px = t.xmin + x * t.dx, py = t.ymax - y * t.dx;
+      let zr = julia ? px : 0, zi = julia ? py : 0, cr = julia ? t.jr : px, ci = julia ? t.ji : py;
+      let n = 0, zr2 = zr*zr, zi2 = zi*zi, sum = 0;
+      while(n < t.maxIter && zr2 + zi2 < 1e4){
+        const nzi = sg*zr*zi + ci; zr = zr2 - zi2 + cr; zi = nzi; zr2 = zr*zr; zi2 = zi*zi; n++;
+        if(t.stripe > 0) sum += 0.5 + 0.5 * Math.sin(t.sf * Math.atan2(zi, zr));
+      }
+      if(n >= t.maxIter){ out[o+3] = 1; continue; }
+      out[o] = n + 1 - Math.log(0.5 * Math.log(zr2 + zi2)) / Math.LN2;
+      out[o+1] = sum / n;
+    }
+    return { buf: out };
+  }
+
+  // Runs a job across the worker pool (or main thread); returns the filled buffer, or null if superseded.
+  async function gatherLaceBuf(token, base, W, Hh){
+    const buf = new Float32Array(W*Hh*4), pool = getLaceWorkers(), lanes = pool || [null];
+    let nextRow = 0, doneRows = 0;
+    async function lane(wk){
+      while(token === renderToken && nextRow < Hh){
+        const y0 = nextRow, y1 = Math.min(Hh, y0 + 16); nextRow = y1;
+        const res = await runLaceTask(wk, Object.assign({y0, y1}, base));
+        if(token !== renderToken) return;
+        buf.set(res.buf, y0 * W * 4); doneRows += y1 - y0;
+        progressBar.style.width = (doneRows / Hh * 90) + '%';
+      }
+    }
+    await Promise.all(lanes.map(lane));
+    return token === renderToken ? buf : null;
+  }
+
+  function reliefShade(buf, W, Hh, ss, tw, th, data){
+    const N = 1024, lut = new Float32Array(N*3), st = state.gradient.map(hexToRgb), m = st.length;
+    for(let i = 0; i < N; i++){
+      const s = i / N * m, a = Math.floor(s) % m, f = s - Math.floor(s), c1 = st[a], c2 = st[(a+1) % m];
+      for(let k = 0; k < 3; k++) lut[i*3+k] = c1[k] + (c2[k] - c1[k]) * f;
+    }
+    const inter = hexToRgb(state.interior), L = buildLight(), ln = Math.sqrt(L.lx*L.lx + L.ly*L.ly + L.h*L.h) || 1;
+    const cyc = state.reliefCycle, am = state.reliefStripe, bump = state.reliefBump * ss, inv = 1 / (ss*ss), TAU = Math.PI * 2;
+    const hh = new Float32Array(W*Hh);
+    for(let i = 0; i < hh.length; i++){
+      const j = i*4; if(buf[j+3] > 0) continue;
+      const p = buf[j] / cyc, f = p - Math.floor(p);
+      hh[i] = 0.5 - 0.5*Math.cos(TAU*f) + 0.15*Math.sin(2*TAU*f) + 0.4*am*buf[j+1];   // asymmetric ribs catch light on one side
+    }
+    for(let oy = 0; oy < th; oy++) for(let ox = 0; ox < tw; ox++){
+      let R = 0, G = 0, B = 0;
+      for(let sy = 0; sy < ss; sy++){
+        const y = oy*ss + sy, yu = y > 0 ? y-1 : y, yd = y < Hh-1 ? y+1 : y;
+        for(let sx = 0; sx < ss; sx++){
+          const x = ox*ss + sx, i = y*W + x, j = i*4;
+          if(buf[j+3] > 0){ R += inter[0]; G += inter[1]; B += inter[2]; continue; }
+          const xl = x > 0 ? x-1 : x, xr = x < W-1 ? x+1 : x;
+          const nx = -(hh[y*W+xr] - hh[y*W+xl]) * bump, ny = -(hh[yd*W+x] - hh[yu*W+x]) * bump, nl = Math.sqrt(nx*nx + ny*ny + 1);
+          const dif = Math.max(0, Math.min(1, (nx/nl*L.lx + ny/nl*L.ly + L.h/nl) / ln));
+          const shade = L.ambient + (1 - L.ambient) * dif, spec = Math.pow(dif, L.shininess) * L.specStrength;
+          const p = buf[j] / cyc; let tt = p - Math.floor(p) + am * (buf[j+1] - 0.5); tt -= Math.floor(tt);
+          const li = Math.floor(tt * N) * 3, r = lut[li]*shade, g = lut[li+1]*shade, b = lut[li+2]*shade;
+          R += Math.min(255, r + spec*(255-r)); G += Math.min(255, g + spec*(255-g)); B += Math.min(255, b + spec*(255-b));
+        }
+      }
+      const k = (oy*tw + ox) * 4; data[k] = R*inv; data[k+1] = G*inv; data[k+2] = B*inv; data[k+3] = 255;
+    }
+  }
+
+  async function renderRelief(targetCtx, tw, th, onDone){
+    const token = ++renderToken, t0 = performance.now();
+    progressBar.classList.add('is-active'); progressBar.style.width = '3%';
+    const ss = effectiveSS(tw, th);
+    const W = tw*ss, Hh = th*ss;
+    const base = { mode: 'relief', w: W, xmin: state.cx - state.scale/2, ymax: state.cy + state.scale/(tw/th)/2, dx: state.scale / W,
+      kind: state.type, jr: state.juliaRe, ji: state.juliaIm, maxIter: state.maxIter, sf: 6, stripe: state.reliefStripe };
+    const buf = await gatherLaceBuf(token, base, W, Hh);
+    if(!buf) return;
+    const img = targetCtx.createImageData(tw, th);
+    reliefShade(buf, W, Hh, ss, tw, th, img.data);
+    targetCtx.putImageData(img, 0, 0);
+    progressBar.style.width = '0%'; progressBar.classList.remove('is-active');
+    document.getElementById('renderTime').textContent = `relief · ${ss}× · ${laceWorkers ? laceWorkers.length + ' workers' : 'main thread'} · ${(performance.now()-t0).toFixed(0)}ms`;
+    if(onDone) onDone();
+  }
+
+  function applyCanvasShape(){
+    W = state.portrait ? 650 : 900; H = state.portrait ? 900 : 650;
+    canvas.width = W; canvas.height = H;
+    document.getElementById('canvasShape').value = state.portrait ? 'portrait' : 'landscape';
+  }
+
   function applyAutoIter(){
     if(!state.autoIter) return;
     // Deeper zooms need more iterations to resolve new boundary detail; without this,
@@ -869,6 +1125,51 @@
     gasketControls.style.display = isGasket ? 'block' : 'none';
     setSectionDisabled(shadingSection, isGasket, 'shadingDisabledNote');
     setSectionDisabled(detailSection, isGasket, 'detailDisabledNote');
+    syncLaceCompat();
+  }
+  // Ornate Lace compatibility: disable what it can't use, mirroring the Gasket behaviour.
+  function syncLaceCompat(){
+    const g = id => document.getElementById(id), mode = state.shadingMode;
+    const lace = mode === 'lace', relief = mode === 'relief', own = lace || relief, bs = state.type === 'burningship';
+    ['lace', 'relief'].forEach(v => { g('shadingMode').querySelector('option[value="' + v + '"]').disabled = bs; });
+    ['burningship', 'apollonian'].forEach(v => { g('fractalType').querySelector('option[value="' + v + '"]').disabled = own; });
+    g('laceControls').style.display = lace ? 'block' : 'none';
+    g('laceDisabledNote').style.display = lace ? 'none' : 'block';
+    g('laceSection').classList.toggle('section-disabled', !lace);
+    g('reliefControls').style.display = relief ? 'block' : 'none';
+    g('reliefDisabledNote').style.display = relief ? 'none' : 'block';
+    g('reliefSection').classList.toggle('section-disabled', !relief);
+    g('paletteLaceNote').style.display = own ? 'block' : 'none';
+    g('paletteLaceNote').textContent = relief ? 'Glossy Relief uses its own multi-stop gradient (see Glossy Relief Settings). Stops, band cycle and palette presets are unavailable; Interior and Background still apply.' : 'Ornate Lace uses its own Gold / Silver colors (see Ornate Lace Settings). Stops, band cycle and palette presets are unavailable; Interior and Background still apply.';
+    g('palettePreview').style.opacity = own ? '0.35' : '';
+    ['colorA', 'colorB', 'colorC', 'cycleScale'].forEach(id => {
+      const el = g(id); el.disabled = own;
+      const row = el.closest('.row, .swatch-row'); if(row) row.classList.toggle('is-disabled', own);
+    });
+    document.querySelectorAll('[data-preset]').forEach(b => { b.disabled = own; });
+    const hint = g('litHint');
+    if(hint){
+      if(!hint.dataset.orig) hint.dataset.orig = hint.textContent;
+      hint.textContent = own ? 'These lights shape the metallic relief. Ambient sets how dark the shadows get; Specular and Gloss set how bright and tight the highlights are. Light angle and height move the shading across the ribs and threads.' : hint.dataset.orig;
+    }
+  }
+  function updateExportNote(){
+    const note = document.getElementById('exportSSNote'); if(!note) return;
+    const [ew, eh] = document.getElementById('exportSize').value.split('x').map(Number);
+    const eff = effectiveSS(ew, eh);
+    note.textContent = state.type === 'apollonian' ? 'Supersampling does not apply to the Gasket.' :
+      state.ss <= 1 ? 'Supersampling is off (turn it on under Detail). Note: exports above 1600 × 1200 are limited to 1×; 1600 × 1200 supports up to 2×.' :
+      `Supersampling: ${state.ss}× selected, ${eff}× at this size. Exports above 1600 × 1200 are limited to 1× to protect browser memory; 1600 × 1200 supports up to 2×.`;
+  }
+  function syncAllControls(){
+    Object.keys(state).forEach(k => {
+      const el = document.getElementById(k), v = state[k]; if(!el || v === null || typeof v === 'object') return;
+      if(typeof v === 'boolean') el.checked = v; else el.value = v;
+    });
+    const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = v; };
+    set('maxIterNum', state.maxIter); set('ssGlobal', state.ss);
+    ['colorA','colorB','colorC'].forEach((id, i) => set(id, state.colors[i]));
+    set('colorInterior', state.interior); set('colorBg', state.bg);
   }
   fractalTypeSel.addEventListener('change', () => {
     state.type = fractalTypeSel.value;
@@ -945,12 +1246,13 @@
   updateBubbleTrapVisibility();
   shadingModeSel.addEventListener('change', () => {
     state.shadingMode = shadingModeSel.value;
-    const isLit = state.shadingMode === 'lit';
+    const isLit = state.shadingMode === 'lit' || state.shadingMode === 'lace' || state.shadingMode === 'relief';
     const isTrap = state.shadingMode === 'trap' || state.shadingMode === 'filigree';
     litControls.style.display = (isLit || isTrap) ? 'block' : 'none';
     trapControls.style.display = isTrap ? 'block' : 'none';
     cycleScaleRow.style.display = (isLit || isTrap) ? 'none' : 'flex';
     updateBubbleTrapVisibility();
+    syncLaceCompat();
     renderMain();
   });
   const bubbleTrapShapeSel = document.getElementById('bubbleTrapShape');
@@ -966,6 +1268,38 @@
   bubbleTrapInput('bubbleTrapRadius', 'bubbleTrapRadius', 'bubbleTrapRadiusValue', 2);
   bubbleTrapInput('bubbleTrapGlow', 'bubbleTrapGlow', 'bubbleTrapGlowValue', 1);
   bubbleTrapInput('bubbleTrapFrequency', 'bubbleTrapFrequency', 'bubbleTrapFrequencyValue', 2);
+
+  [['laceThick','laceThick'],['laceDensity','laceDensity'],['laceSpines','laceSpines'],['laceGlow','laceGlow'],['laceWarp','laceWarp']].forEach(([id,key]) =>
+    document.getElementById(id).addEventListener('input', e => { state[key] = parseFloat(e.target.value); renderMain(); }));
+  document.getElementById('laceGold').addEventListener('input', e => { state.laceGold = e.target.value; renderMain(); });
+  document.getElementById('laceSilver').addEventListener('input', e => { state.laceSilver = e.target.value; renderMain(); });
+
+  const gradPresets = {
+    turq: ['#05121f','#0b5f8a','#2fb6d6','#c8f4ff','#1a0b05','#8a2a08','#ff7a1a','#ffd27a'],
+    ocean: ['#020b1c','#0a3d6b','#1f8fb5','#bff3f0','#0a2a3a'],
+    molten: ['#0a0303','#6b0f0a','#e8590c','#ffd166','#fff3d6','#3a1405']
+  };
+  function updateGradPreview(){
+    document.getElementById('gradPreview').style.background = 'linear-gradient(90deg,' + state.gradient.join(',') + ',' + state.gradient[0] + ')';
+  }
+  function renderGradEditor(){
+    const box = document.getElementById('gradStops'); box.innerHTML = '';
+    state.gradient.forEach((c, i) => {
+      const row = document.createElement('div'); row.className = 'row'; row.innerHTML = '<label>Stop ' + (i+1) + '</label>';
+      const inp = document.createElement('input'); inp.type = 'color'; inp.value = c;
+      inp.addEventListener('input', e => { state.gradient[i] = e.target.value; updateGradPreview(); renderMain(); });
+      row.appendChild(inp); box.appendChild(row);
+    });
+    updateGradPreview();
+  }
+  document.getElementById('gradAdd').addEventListener('click', () => { if(state.gradient.length < 12){ state.gradient.push(state.gradient[state.gradient.length-1]); renderGradEditor(); renderMain(); } });
+  document.getElementById('gradRemove').addEventListener('click', () => { if(state.gradient.length > 3){ state.gradient.pop(); renderGradEditor(); renderMain(); } });
+  document.querySelectorAll('[data-grad]').forEach(b => b.addEventListener('click', () => { state.gradient = gradPresets[b.dataset.grad].slice(); renderGradEditor(); renderMain(); }));
+  ['reliefCycle','reliefBump','reliefStripe'].forEach(id => document.getElementById(id).addEventListener('input', e => { state[id] = parseFloat(e.target.value); renderMain(); }));
+  document.getElementById('ssGlobal').addEventListener('change', e => { state.ss = parseInt(e.target.value, 10); updateExportNote(); renderMain(); });
+  document.getElementById('exportSize').addEventListener('change', updateExportNote);
+  document.getElementById('canvasShape').addEventListener('change', e => { state.portrait = e.target.value === 'portrait'; applyCanvasShape(); renderMain(); });
+  renderGradEditor();
 
   function lightInput(id, key, isInt){
     document.getElementById(id).addEventListener('input', e => {
@@ -1207,10 +1541,28 @@
     renderMain();
   }, { passive: false });
 
+  // ---- PNG metadata: writes tEXt chunks (author, software, view parameters) into exports ----
+  const crcTable = (() => { const t = new Uint32Array(256); for(let n = 0; n < 256; n++){ let c = n; for(let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(b){ let c = 0xFFFFFFFF; for(let i = 0; i < b.length; i++) c = crcTable[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function textChunk(key, val){
+    const body = []; for(const ch of key + '\0' + val) body.push(ch.charCodeAt(0) & 255);
+    const out = new Uint8Array(12 + body.length), dv = new DataView(out.buffer);
+    dv.setUint32(0, body.length); out.set([116, 69, 88, 116], 4); out.set(body, 8);
+    dv.setUint32(8 + body.length, crc32(out.subarray(4, 8 + body.length)));
+    return out;
+  }
+  async function addPngMeta(blob){
+    const ab = blob.arrayBuffer ? await blob.arrayBuffer() : await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsArrayBuffer(blob); });
+    const bytes = new Uint8Array(ab), params = JSON.stringify({ type: state.type, shading: state.shadingMode, cx: +state.cx.toPrecision(16), cy: +state.cy.toPrecision(16), scale: state.scale, maxIter: state.maxIter, ss: state.ss });
+    const chunks = [['Author', 'DigitalDraven'], ['Copyright', 'Created by DigitalDraven'], ['Software', 'Fractal Explorer 2.4.0'], ['Comment', 'Created by DigitalDraven using Fractal Explorer'], ['Parameters', params]].map(e => textChunk(e[0], e[1]));
+    return new Blob([bytes.subarray(0, 33), ...chunks, bytes.subarray(33)], {type: 'image/png'});   // after the 33-byte signature + IHDR
+  }
+
   // ---- export ----
   document.getElementById('exportBtn').addEventListener('click', () => {
     const sizeSel = document.getElementById('exportSize').value;
-    const [ew, eh] = sizeSel.split('x').map(Number);
+    let [ew, eh] = sizeSel.split('x').map(Number);
+    if(state.portrait){ [ew, eh] = [eh, ew]; }
     const exportCanvas = document.createElement('canvas');
     exportCanvas.width = ew; exportCanvas.height = eh;
     const exportCtx = exportCanvas.getContext('2d');
@@ -1221,7 +1573,8 @@
     btn.disabled = true;
 
     render(exportCanvas, exportCtx, ew, eh, () => {
-      exportCanvas.toBlob(blob => {
+      exportCanvas.toBlob(async rawBlob => {
+        const blob = await addPngMeta(rawBlob);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         const stamp = new Date().toISOString().replace(/[:.]/g,'-');
@@ -1248,10 +1601,14 @@
     magenta: { colors:['#08040d','#92245f','#6ac8e8'], interior:'#020207', bg:'#050508', shadingMode:'trap', trapBump:115, trapBandWarp:0.55, lightAngle:140, lightHeight:1.3, lightAmbient:0.04, lightSpec:0.75, lightShininess:8, trapColorSource:'sequence', trapCycle:true, trapRepeats:16 },
     lake: { colors:['#030a20','#123d8c','#e4eaff'], interior:'#020617', bg:'#174fbd', shadingMode:'trap', trapBump:55, trapBandWarp:0.1, lightAngle:145, lightHeight:1.8, lightAmbient:0.18, lightSpec:0.82, lightShininess:12, trapColorSource:'distance', trapCycle:false },
     gold: { colors:['#30170b','#c28a54','#fff0c9'], interior:'#1b0b04', bg:'#180b05', shadingMode:'filigree', bubbleTrapShape:'ringtrap', bubbleTrapRadius:0.5, bubbleTrapGlow:10, bubbleTrapFrequency:1, trapBump:32, trapBandWarp:0.18, lightAngle:130, lightHeight:1.2, lightAmbient:0.22, lightSpec:0.35, lightShininess:5, trapColorSource:'sequence', trapCycle:true, trapRepeats:20 },
-    indigo: { colors:['#08071b','#3935df','#d4ccff'], interior:'#03020a', bg:'#07051b', shadingMode:'lit', lightAngle:135, lightHeight:1.7, lightAmbient:0.08, lightSpec:0.9, lightShininess:16 }
+    indigo: { colors:['#08071b','#3935df','#d4ccff'], interior:'#03020a', bg:'#07051b', shadingMode:'lit', lightAngle:135, lightHeight:1.7, lightAmbient:0.08, lightSpec:0.9, lightShininess:16 },
+    spiral: { type:'mandelbrot', cx:-0.7436447, cy:0.1318252, scale:0.00012, autoIter:true, portrait:true, interior:'#02060a', bg:'#02060a', shadingMode:'relief', gradient:['#05121f','#0b5f8a','#2fb6d6','#c8f4ff','#1a0b05','#8a2a08','#ff7a1a','#ffd27a'], reliefCycle:5, reliefBump:6, reliefStripe:0.35, ss:2, lightAngle:125, lightHeight:1.0, lightAmbient:0.25, lightSpec:0.6, lightShininess:10 },
+    satin: { shadingMode:'relief', gradient:['#05121f','#0b5f8a','#2fb6d6','#c8f4ff','#1a0b05','#8a2a08','#ff7a1a','#ffd27a'], reliefCycle:105, reliefBump:17, reliefStripe:0.77, ss:2, interior:'#02060a', bg:'#02060a', lightAngle:125, lightHeight:1.0, lightAmbient:0.25, lightSpec:0.6, lightShininess:10 },
+    lace: { type:'mandelbrot', cx:-0.7436, cy:0.1318, scale:0.012, autoIter:true, interior:'#050403', bg:'#0c0c0f', shadingMode:'lace', laceGold:'#e2a93b', laceSilver:'#bfc7d1', laceThick:1, laceDensity:3, laceSpines:8, laceGlow:12, laceWarp:0, ss:2, lightAngle:130, lightHeight:1.3, lightAmbient:0.3, lightSpec:0.5, lightShininess:8 }
   };
-  document.querySelectorAll('[data-art-preset]').forEach(button => button.addEventListener('click', () => {
-    const p = artPresets[button.dataset.artPreset]; if(!p) return;
+  function applyPreset(p){
+    // Look-only lace/relief presets on an incompatible type fall back to the default Mandelbrot view.
+    if((p.shadingMode === 'lace' || p.shadingMode === 'relief') && !p.type && (state.type === 'burningship' || state.type === 'apollonian')) p = Object.assign({type:'mandelbrot', cx:-0.5, cy:0, scale:3.2}, p);
     Object.assign(state, p);
     ['colorA','colorB','colorC'].forEach((id,i)=>document.getElementById(id).value=state.colors[i]);
     document.getElementById('colorInterior').value=state.interior; document.getElementById('colorBg').value=state.bg;
@@ -1261,11 +1618,40 @@
     document.getElementById('trapCycle').checked=!!state.trapCycle;
     document.getElementById('trapColorSource').value=state.trapColorSource||'distance';
     shadingModeSel.value=state.shadingMode;
-    const isLit=state.shadingMode==='lit'||state.shadingMode==='trap'||state.shadingMode==='filigree';
+    const isLit=state.shadingMode==='relief'||state.shadingMode==='lace'||state.shadingMode==='lit'||state.shadingMode==='trap'||state.shadingMode==='filigree';
     const isTrap=state.shadingMode==='trap'||state.shadingMode==='filigree';
     litControls.style.display=isLit?'block':'none'; trapControls.style.display=isTrap?'block':'none'; cycleScaleRow.style.display=isLit?'none':'flex';
     updateBubbleTrapVisibility();
-    updatePalettePreview(); renderMain();
-  }));
+    if(p.gradient) state.gradient = p.gradient.slice();
+    applyCanvasShape(); renderGradEditor();
+    ['reliefCycle','reliefBump','reliefStripe'].forEach(id => { document.getElementById(id).value = state[id]; });
+    fractalTypeSel.value = state.type; syncTypeControls();
+    ['laceThick','laceDensity','laceSpines','laceGlow','laceWarp','laceGold','laceSilver'].forEach(id => { document.getElementById(id).value = state[id]; });
+    document.getElementById('autoIter').checked = state.autoIter;
+    syncAllControls(); syncLaceCompat();
+    updatePalettePreview(); updateExportNote(); renderMain();
+  }
+  document.querySelectorAll('[data-art-preset]').forEach(button => button.addEventListener('click', () => { const p = artPresets[button.dataset.artPreset]; if(p) applyPreset(p); }));
+
+  // ---- My Presets: full snapshot of view + settings, kept in this browser ----
+  const USER_KEY = 'fractalExplorerUserPresets';
+  function loadUserPresets(){ try{ return JSON.parse(localStorage.getItem(USER_KEY) || '[]'); }catch(e){ return []; } }
+  function storeUserPresets(list){ try{ localStorage.setItem(USER_KEY, JSON.stringify(list)); }catch(e){ showError('Could not save the preset: browser storage is unavailable.'); } }
+  function renderUserPresets(){
+    const box = document.getElementById('userPresets'); box.innerHTML = '';
+    loadUserPresets().forEach((item, i) => {
+      const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:6px;margin-top:6px;';
+      const b = document.createElement('button'); b.textContent = item.name; b.style.flex = '1';
+      b.addEventListener('click', () => applyPreset(JSON.parse(JSON.stringify(item.data))));
+      const d = document.createElement('button'); d.textContent = '×'; d.title = 'Delete preset';
+      d.addEventListener('click', () => { const l = loadUserPresets(); l.splice(i, 1); storeUserPresets(l); renderUserPresets(); });
+      row.append(b, d); box.appendChild(row);
+    });
+  }
+  document.getElementById('savePresetBtn').addEventListener('click', () => {
+    const name = (prompt('Name this preset (saves the current view and all settings):') || '').trim(); if(!name) return;
+    const l = loadUserPresets(); l.push({name, data: JSON.parse(JSON.stringify(state))}); storeUserPresets(l); renderUserPresets();
+  });
+  renderUserPresets(); updateExportNote();
 
 })();

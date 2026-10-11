@@ -459,3 +459,5 @@ input[type="range"]::-moz-range-thumb {
   border-left: 2px solid var(--ink-dim);
   background: rgba(255,255,255,0.025);
 }
+
+.row.is-disabled, .swatch-row.is-disabled { opacity: 0.4; pointer-events: none; }

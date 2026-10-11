@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fractal Explorer 2.1.6a</title>
+<title>Fractal Explorer 2.4.0</title>
 <link rel="stylesheet" href="css/main.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
 <header>
   <div class="brand">
     <span class="mark"></span>
-    <h1>Fractal Explorer <span class="version-chip">2.1.6a</span></h1>
+    <h1>Fractal Explorer <span class="version-chip">2.4.0</span></h1>
     <span class="sub">/ escape-time renderer</span>
   </div>
   <div class="status" id="statusLine">iter <b id="statIter">300</b> &nbsp;·&nbsp; zoom <b id="statZoom">1.0×</b></div>
@@ -63,6 +63,7 @@
 
     <div class="section">
       <div class="section-title">Palette</div>
+      <div class="hint" id="paletteLaceNote" style="display:none; margin-bottom:8px;">Ornate Lace uses its own Gold / Silver colors (see Ornate Lace Settings). Stops, band cycle and palette presets are unavailable; Interior and Background still apply.</div>
       <div class="swatch-row" style="margin-bottom:8px;">
         <label>Stop A</label><input type="color" id="colorA" value="#050512">
       </div>
@@ -101,8 +102,15 @@
         <button data-art-preset="lake">Thorn Blue Lake</button>
         <button data-art-preset="gold">Golden Filigree</button>
         <button data-art-preset="indigo">Electric Indigo</button>
+        <button data-art-preset="lace">Ornate Lace</button>
+        <button data-art-preset="spiral">Turquoise Spiral</button>
+        <button data-art-preset="satin">Satin Spiral (look only)</button>
       </div>
-      <div class="hint">Presets are starting points; every control remains editable.</div>
+      <div class="hint">Presets are starting points; every control remains editable. "Satin Spiral" changes only the look and keeps your current view.</div>
+      <div class="section-title" style="margin-top:14px;">My Presets</div>
+      <button id="savePresetBtn" style="width:100%;">Save current view &amp; settings…</button>
+      <div id="userPresets"></div>
+      <div class="hint">Saved in this browser only. Includes the exact view, so you can return to a spot you found.</div>
     </div>
 
     <div class="section" id="shadingSection">
@@ -113,6 +121,8 @@
         <option value="lit">3D Lit — Potential Folds</option>
         <option value="trap">3D Lit — Orbit-Trap Bubbles</option>
         <option value="filigree">Gold Filigree — Orbit Lines</option>
+        <option value="lace">Ornate Lace — Gold &amp; Silver Threads</option>
+        <option value="relief">Glossy Relief — Polished Metal</option>
       </select>
       <div id="trapControls" style="display:none; margin-top:12px;">
         <div class="row">
@@ -198,7 +208,7 @@
           <label>Gloss</label>
           <input type="range" id="lightShininess" min="1" max="40" step="1" value="6">
         </div>
-        <div class="hint">Stop A shades the shadows, Stop C shades the highlights. Try the "Bubble / egg" preset above as a starting point.</div>
+        <div class="hint" id="litHint">Stop A shades the shadows, Stop C shades the highlights. Try the "Bubble / egg" preset above as a starting point.</div>
       </div>
     </div>
 
@@ -235,6 +245,38 @@
       </div>
     </div>
 
+    <div class="section" id="laceSection">
+      <div class="section-title">Ornate Lace Settings</div>
+      <div class="section-disabled-note" id="laceDisabledNote">Available with Ornate Lace shading.</div>
+      <div id="laceControls" style="display:none; margin-top:12px;">
+        <div class="row"><label>Gold</label><input type="color" id="laceGold" value="#e2a93b"></div>
+        <div class="row"><label>Silver</label><input type="color" id="laceSilver" value="#bfc7d1"></div>
+        <div class="row"><label>Thread weight</label><input type="range" id="laceThick" min="0.3" max="4" step="0.1" value="1"></div>
+        <div class="row"><label>Thread density</label><input type="range" id="laceDensity" min="1" max="8" step="0.25" value="3"></div>
+        <div class="row"><label>Star spines</label><input type="range" id="laceSpines" min="0" max="16" step="1" value="8"></div>
+        <div class="row"><label>Star glow</label><input type="range" id="laceGlow" min="2" max="40" step="1" value="12"></div>
+        <div class="row"><label>Spiral warp</label><input type="range" id="laceWarp" min="0" max="1" step="0.05" value="0"></div>
+        <div class="hint">Threads are drawn from a distance estimate, so they stay thin at any zoom; each ridge alternates gold / silver. Star spines add radial gold bursts. Spiral warp repeats the view around its center in a twisting log-polar pattern (seams are expected). Lighting uses the light controls above. Rendering runs on background workers. Burning Ship and Apollonian Gasket are unavailable while this mode is selected.</div>
+      </div>
+    </div>
+
+    <div class="section" id="reliefSection">
+      <div class="section-title">Glossy Relief Settings</div>
+      <div class="section-disabled-note" id="reliefDisabledNote">Available with Glossy Relief shading.</div>
+      <div id="reliefControls" style="display:none; margin-top:12px;">
+        <div id="gradPreview" class="palette-preview" style="margin-bottom:10px;"></div>
+        <div id="gradStops"></div>
+        <div class="btn-row" style="margin:8px 0;"><button id="gradAdd">+ Stop</button><button id="gradRemove">− Stop</button></div>
+        <div class="preset-grid" style="margin-bottom:10px;">
+          <button data-grad="turq">Turquoise &amp; Ember</button><button data-grad="ocean">Ocean Glass</button><button data-grad="molten">Molten</button>
+        </div>
+        <div class="row"><label>Color cycle</label><input type="range" id="reliefCycle" min="2" max="120" step="1" value="24"></div>
+        <div class="row"><label>Relief</label><input type="range" id="reliefBump" min="0.5" max="20" step="0.5" value="5"></div>
+        <div class="row"><label>Stripe texture</label><input type="range" id="reliefStripe" min="0" max="1" step="0.05" value="0.35"></div>
+        <div class="hint">Colors cycle through the gradient by smooth escape time, and the same value is lit as raised, glossy ribs using the light controls above. Stripe texture adds fine woven detail. Burning Ship and Apollonian Gasket are unavailable while this mode is selected.</div>
+      </div>
+    </div>
+
     <div class="section" id="detailSection">
       <div class="section-title">Detail</div>
       <div class="section-disabled-note" id="detailDisabledNote">Not available for Apollonian Gasket.</div>
@@ -247,6 +289,9 @@
         <input type="number" id="maxIterNum" min="50" max="4000" value="300">
       </div>
       <input type="range" id="maxIter" min="50" max="4000" step="10" value="300" style="margin-top:8px;">
+      <div class="row" style="margin-top:12px;"><label>Supersampling</label>
+        <select id="ssGlobal" style="width:150px;"><option value="1">Off (1×)</option><option value="2">2× (smooth)</option><option value="3">3× (slow)</option></select></div>
+      <div class="hint">Supersampling renders extra pixels and averages them down for smoother edges. 2× takes about 4× as long. It applies to every mode except the Gasket.</div>
       <div class="hint">Deeper zooms need more iterations to resolve new detail — with auto iterations on, this ramps up automatically as you zoom. Turn it off to set a fixed value yourself.</div>
     </div>
 
@@ -259,6 +304,7 @@
       <div class="btn-row">
         <button id="resetBtn">Reset view</button>
       </div>
+      <div class="row" style="margin:8px 0;"><label>Canvas shape</label><select id="canvasShape" style="width:150px;"><option value="landscape">Landscape 900×650</option><option value="portrait">Portrait 650×900</option></select></div>
       <div class="hint">Drag on the canvas to zoom to a region. Scroll to zoom at the cursor. Double-click to zoom in on a point.</div>
     </div>
 
@@ -272,6 +318,7 @@
           <option value="2400x1800">2400 × 1800</option>
         </select>
       </div>
+      <div class="hint" id="exportSSNote" style="margin-bottom:10px;"></div>
       <button class="btn-primary" id="exportBtn" style="width:100%;">Save PNG</button>
     </div>
   </aside>

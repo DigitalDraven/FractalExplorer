@@ -1,4 +1,26 @@
-# Fractal Explorer 2.1.6a
+# Fractal Explorer 2.4.0
+
+## Changes in 2.4.0
+- **Supersampling for every mode** (Detail section: Off / 2× / 3×). Existing renderers are unchanged; the frame is rendered larger and averaged down. The Gasket (vector) is excluded; Lace and Relief use the same control. Orbit-trap relief is scaled so it looks the same when supersampled.
+- **Export note** states the supersampling that will actually apply at the chosen size. Exports above 1600 × 1200 are limited to 1× to protect browser memory; 1600 × 1200 supports up to 2×.
+- **PNG metadata:** every exported PNG carries Author / Copyright / Comment "DigitalDraven", the software version, and the view parameters (center, scale, iterations).
+- **My Presets:** save the exact view and all settings under a name (stored in this browser). New built-in **Satin Spiral** look preset (keeps your current view).
+- Light-controls hint now describes relief lighting when Lace or Glossy Relief is active.
+- Burning Ship code is unchanged.
+
+## Changes in 2.3.0
+- New shading mode **Glossy Relief — Polished Metal**: smooth escape time drives a cyclic multi-stop gradient and is lit as raised, glossy ribs using the existing light controls. Includes a stripe-average texture slider, relief and color-cycle controls, and 1×/2×/3× supersampling on the worker pipeline.
+- **Gradient editor** (3-12 stops) with Turquoise & Ember, Ocean Glass and Molten presets.
+- **Canvas shape** option (Landscape 900×650 / Portrait 650×900); exports swap automatically.
+- New art preset **Turquoise Spiral**.
+- Glossy Relief follows the same compatibility rules as Ornate Lace (Burning Ship, Gasket and the 3-stop palette controls are disabled while it is active).
+- No changes to Burning Ship rendering, orientation, or zoom code.
+
+## Changes in 2.2.0
+- New shading mode: **Ornate Lace — Gold & Silver Threads** (plus an "Ornate Lace" art preset). Distance-estimated thin threads that alternate gold/silver, an N-fold star orbit trap, relief lighting from the existing light controls, and an optional log-polar spiral warp. Works with Mandelbrot, Julia and Tricorn.
+- 2× / 3× supersampling for Ornate Lace, rendered across Web Workers (falls back to the main thread if workers are unavailable). Very large exports reduce supersampling automatically to cap memory.
+- While Ornate Lace is selected, incompatible controls are disabled (Burning Ship, Apollonian Gasket, palette stops / band cycle / palette presets). Selecting Burning Ship or the Gasket disables the Lace option.
+- No changes to Burning Ship rendering, orientation, or zoom code.
 
 ## Changes in 2.1.6a
 - Corrected drag-to-zoom vertical center mapping for Burning Ship only; other fractal types and Burning Ship double-click zoom are unchanged.
