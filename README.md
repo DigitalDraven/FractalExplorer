@@ -1,3 +1,7 @@
+<img width="2400" height="1800" alt="fractal-mandelbrot-2026-10-11T22-46-56-944Z" src="https://github.com/user-attachments/assets/aef823fd-166a-4e55-b792-7af9fb72e5e3" />
+<img width="2400" height="1800" alt="fractal-mandelbrot-2026-10-10T21-10-38-294Z" src="https://github.com/user-attachments/assets/3ad736f4-6e41-4f36-92f0-2185657c9b9f" />
+<img width="900" height="650" alt="Diamond fractal-mandelbrot-2026-10-11T03-03-54-575Z" src="https://github.com/user-attachments/assets/280fa826-7011-4e37-bcb6-71a4534fbeae" />
+
 # Fractal Explorer 2.5.0
 https://digitaldraven.github.io/FractalExplorer/
 
