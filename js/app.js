@@ -524,86 +524,6 @@
   // ---- Gemini-compatible Burning Ship renderer ----
   // Mirrors Gemini's Burning Ship iteration and smooth escape-time coloring,
   // using this app's current palette and canvas/state architecture.
-  function renderBurningShipGemini(targetCtx, tw, th, onDone){
-    const factor = 1.5; // Gemini Burning Ship preset enables 1.5x supersampling
-    const hiCanvas = document.createElement('canvas');
-    hiCanvas.width = Math.max(1, Math.round(tw * factor));
-    hiCanvas.height = Math.max(1, Math.round(th * factor));
-    const hiCtx = hiCanvas.getContext('2d');
-    const token = ++renderToken;
-    const imgData = hiCtx.createImageData(hiCanvas.width, hiCanvas.height);
-    const data = imgData.data;
-    const palette = buildPaletteFn();
-    const maxIter = state.maxIter;
-    const xmin = state.cx - state.scale / 2;
-    const xmax = state.cx + state.scale / 2;
-    const scaleY = state.scale / (tw / th);
-    const ymin = state.cy - scaleY / 2;
-    const ymax = state.cy + scaleY / 2;
-    let row = 0;
-    const rowsPerChunk = Math.max(1, Math.floor(hiCanvas.height / 100));
-    const t0 = performance.now();
-    progressBar.classList.add('is-active');
-    progressBar.style.width = '3%';
-
-    function chunk(){
-      if(token !== renderToken) return;
-      const end = Math.min(hiCanvas.height, row + rowsPerChunk);
-      for(let py = row; py < end; py++){
-        // Match Gemini's complex-plane orientation: y0 starts at ymin and increases down the canvas.
-        const ci = ymin + (py / Math.max(1, hiCanvas.height - 1)) * (ymax - ymin);
-        for(let px = 0; px < hiCanvas.width; px++){
-          const cr = xmin + (px / Math.max(1, hiCanvas.width - 1)) * (xmax - xmin);
-          let zr = 0, zi = 0, n = 0;
-          let zr2 = 0, zi2 = 0;
-          // Gemini uses an escape-radius squared of 32 for its pixel renderer.
-          while(n < maxIter && (zr2 + zi2) <= 32.0){
-            const nextR = zr2 - zi2 + cr;
-            const nextI = 2.0 * Math.abs(zr * zi) + ci;
-            zr = nextR; zi = nextI;
-            zr2 = zr * zr; zi2 = zi * zi;
-            n++;
-          }
-          let rgb;
-          if(n >= maxIter){
-            rgb = hexToRgb(state.interior);
-          } else {
-            // Gemini smooth iteration count: nu = log2(log(|z|)/log(2)).
-            const magnitudeSq = Math.max(zr2 + zi2, 1e-300);
-            const logZn = Math.log(magnitudeSq) / 2.0;
-            const nu = Math.log2(Math.max(logZn, 1e-300) / Math.LN2);
-            const smoothN = n + 1.0 - nu;
-            const t = Math.max(0, Math.min(0.999999, smoothN / maxIter));
-            rgb = palette(t);
-          }
-          const idx = (py * hiCanvas.width + px) * 4;
-          data[idx] = Math.round(rgb[0]);
-          data[idx+1] = Math.round(rgb[1]);
-          data[idx+2] = Math.round(rgb[2]);
-          data[idx+3] = 255;
-        }
-      }
-      row = end;
-      progressBar.style.width = (row / hiCanvas.height * 100) + '%';
-      if(row < hiCanvas.height){
-        requestAnimationFrame(chunk);
-      } else {
-        hiCtx.putImageData(imgData, 0, 0);
-        targetCtx.save();
-        targetCtx.imageSmoothingEnabled = true;
-        targetCtx.imageSmoothingQuality = 'high';
-        targetCtx.clearRect(0, 0, tw, th);
-        targetCtx.drawImage(hiCanvas, 0, 0, tw, th);
-        targetCtx.restore();
-        progressBar.style.width = '0%';
-        progressBar.classList.remove('is-active');
-        document.getElementById('renderTime').textContent = `rendered in ${(performance.now()-t0).toFixed(0)}ms`;
-        if(onDone) onDone();
-      }
-    }
-    requestAnimationFrame(chunk);
-  }
-
   // ---- standard single-pass render (color bands / potential-based lighting) ----
   function renderStandard(targetCtx, tw, th, onDone){
     progressBar.classList.add('is-active');
@@ -1092,9 +1012,37 @@
     maxIterNum.value = clamped;
   }
 
+  // ---- View history (Back / Forward): records every change of view; never touches the renderers ----
+  var viewHist = [], viewIdx = -1, histLock = false;
+  const viewKey = v => [v.type, v.cx, v.cy, v.scale, v.juliaRe, v.juliaIm].join('|');
+  function currentView(){ return {type: state.type, cx: state.cx, cy: state.cy, scale: state.scale, juliaRe: state.juliaRe, juliaIm: state.juliaIm}; }
+  function updateHistButtons(){
+    const b = document.getElementById('viewBack'), f = document.getElementById('viewFwd');
+    if(b) b.disabled = viewIdx <= 0; if(f) f.disabled = viewIdx >= viewHist.length - 1;
+  }
+  function recordView(){
+    if(histLock) return;
+    const v = currentView();
+    if(viewIdx >= 0 && viewKey(viewHist[viewIdx]) === viewKey(v)) return;
+    viewHist.length = viewIdx + 1; viewHist.push(v);
+    if(viewHist.length > 200) viewHist.shift();
+    viewIdx = viewHist.length - 1; updateHistButtons();
+  }
+  function stepView(d){
+    const i = viewIdx + d; if(i < 0 || i >= viewHist.length) return;
+    const v = Object.assign({}, viewHist[i]);
+    // Lace / Relief can't show Burning Ship or the Gasket, so in those modes only the position and zoom are restored.
+    if((state.shadingMode === 'lace' || state.shadingMode === 'relief') && (v.type === 'burningship' || v.type === 'apollonian')){ delete v.type; delete v.juliaRe; delete v.juliaIm; }
+    viewIdx = i; histLock = true;
+    Object.assign(state, v);
+    fractalTypeSel.value = state.type; syncAllControls(); syncTypeControls(); syncLaceCompat(); updateHistButtons();
+    renderMain(); histLock = false;
+  }
+
   function renderMain(){
     clearError();
     applyAutoIter();
+    recordView();
     canvasWrap.style.background = state.bg;
     render(canvas, ctx, W, H);
     updateReadout();
@@ -1555,12 +1503,56 @@
     dv.setUint32(8 + body.length, crc32(out.subarray(4, 8 + body.length)));
     return out;
   }
-  async function addPngMeta(blob){
+  async function addPngMeta(blob, ssUsed){
     const ab = blob.arrayBuffer ? await blob.arrayBuffer() : await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsArrayBuffer(blob); });
-    const bytes = new Uint8Array(ab), params = JSON.stringify({ type: state.type, shading: state.shadingMode, cx: +state.cx.toPrecision(16), cy: +state.cy.toPrecision(16), scale: state.scale, maxIter: state.maxIter, ss: state.ss, juliaRe: state.juliaRe, juliaIm: state.juliaIm, reliefCycle: state.reliefCycle, reliefBump: state.reliefBump, reliefStripe: state.reliefStripe });
-    const chunks = [['Author', 'DigitalDraven'], ['Copyright', 'Created by DigitalDraven'], ['Software', 'Fractal Explorer 2.4.1'], ['Comment', 'Created by DigitalDraven using Fractal Explorer'], ['Parameters', params]].map(e => textChunk(e[0], e[1]));
+    const bytes = new Uint8Array(ab), params = JSON.stringify({ type: state.type, shading: state.shadingMode, cx: +state.cx.toPrecision(16), cy: +state.cy.toPrecision(16), scale: state.scale, maxIter: state.maxIter, ss: ssUsed, juliaRe: state.juliaRe, juliaIm: state.juliaIm, reliefCycle: state.reliefCycle, reliefBump: state.reliefBump, reliefStripe: state.reliefStripe });
+    const chunks = [['Author', 'DigitalDraven'], ['Copyright', 'Created by DigitalDraven'], ['Software', 'Fractal Explorer 2.5.0'], ['Comment', 'Created by DigitalDraven using Fractal Explorer'], ['Parameters', params], ['FractalExplorerState', JSON.stringify(state)]].map(e => textChunk(e[0], e[1]));
     return new Blob([bytes.subarray(0, 33), ...chunks, bytes.subarray(33)], {type: 'image/png'});   // after the 33-byte signature + IHDR
   }
+
+  // ---- Restore settings from an exported PNG (button or drag-and-drop) ----
+  function readPngText(ab){
+    const dv = new DataView(ab), out = {};
+    if(ab.byteLength < 8 || dv.getUint32(0) !== 0x89504E47) return null;
+    let p = 8;
+    while(p + 12 <= ab.byteLength){
+      const len = dv.getUint32(p), type = String.fromCharCode(dv.getUint8(p+4), dv.getUint8(p+5), dv.getUint8(p+6), dv.getUint8(p+7));
+      if(type === 'tEXt'){
+        const b = new Uint8Array(ab, p + 8, len), z = b.indexOf(0);
+        if(z > 0){ let k = '', v = ''; for(let i = 0; i < z; i++) k += String.fromCharCode(b[i]); for(let i = z + 1; i < b.length; i++) v += String.fromCharCode(b[i]); out[k] = v; }
+      }
+      if(type === 'IEND') break;
+      p += 12 + len;
+    }
+    return out;
+  }
+  async function openPngSettings(file){
+    try{
+      const ab = file.arrayBuffer ? await file.arrayBuffer() : await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsArrayBuffer(file); });
+      const t = readPngText(ab) || {};
+      let snap = null;
+      if(t.FractalExplorerState) snap = JSON.parse(t.FractalExplorerState);
+      else if(t.Parameters){   // 2.4.x images: partial settings only
+        const q = JSON.parse(t.Parameters), map = {type:'type', shading:'shadingMode', cx:'cx', cy:'cy', scale:'scale', maxIter:'maxIter', juliaRe:'juliaRe', juliaIm:'juliaIm', reliefCycle:'reliefCycle', reliefBump:'reliefBump', reliefStripe:'reliefStripe'};
+        snap = {}; Object.keys(map).forEach(k => { if(q[k] !== undefined) snap[map[k]] = q[k]; });
+      }
+      if(!snap){ showError('No Fractal Explorer settings were found in that PNG (it may predate 2.4.0, or another program removed them).'); return; }
+      const clean = {}; Object.keys(state).forEach(k => { if(Object.prototype.hasOwnProperty.call(snap, k)) clean[k] = snap[k]; });   // only known settings
+      applyPreset(clean);
+    }catch(err){ showError('Could not read settings from that file.'); }
+  }
+  document.getElementById('openPngBtn').addEventListener('click', () => document.getElementById('openPngInput').click());
+  document.getElementById('openPngInput').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if(f) openPngSettings(f); e.target.value = ''; });
+  canvasWrap.addEventListener('dragover', e => e.preventDefault());
+  canvasWrap.addEventListener('drop', e => { e.preventDefault(); const f = e.dataTransfer && e.dataTransfer.files[0]; if(f && /png$/i.test(f.type || f.name)) openPngSettings(f); });
+  document.getElementById('viewBack').addEventListener('click', () => stepView(-1));
+  document.getElementById('viewFwd').addEventListener('click', () => stepView(1));
+  document.addEventListener('keydown', e => {
+    const tg = e.target, tag = tg && tg.tagName;
+    if(e.ctrlKey || e.metaKey || e.altKey || tag === 'TEXTAREA' || tag === 'SELECT' || (tag === 'INPUT' && tg.type !== 'range')) return;
+    if(e.key === '[') stepView(-1); else if(e.key === ']') stepView(1);
+  });
+  updateHistButtons();
 
   // ---- export ----
   document.getElementById('exportBtn').addEventListener('click', () => {
@@ -1578,7 +1570,7 @@
 
     render(exportCanvas, exportCtx, ew, eh, () => {
       exportCanvas.toBlob(async rawBlob => {
-        const blob = await addPngMeta(rawBlob);
+        const blob = await addPngMeta(rawBlob, state.type === 'apollonian' ? 1 : effectiveSS(ew, eh));
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         const stamp = new Date().toISOString().replace(/[:.]/g,'-');

@@ -1,4 +1,11 @@
-# Fractal Explorer 2.4.1
+# Fractal Explorer 2.5.0
+
+## Changes in 2.5.0
+- **Exports restore themselves.** PNGs now embed the complete settings. Use "Open settings from a PNG…" (My Presets) or drop a PNG onto the canvas to return to that exact view and look. 2.4.x images restore their view, Julia seed and Relief settings.
+- **View history:** Back / Forward buttons (and the [ and ] keys) step through the views you have visited.
+- PNG metadata now records the supersampling that was actually applied at the export size.
+- Removed `renderBurningShipGemini`, an unused function that was never called (the 2.1.5 notes below describe it, but Burning Ship has always rendered through the standard renderer). Rendering output is unchanged and verified pixel-identical across modes.
+
 
 ## Changes in 2.4.1
 - Glossy Relief: the stripe texture is now interpolated by the smooth escape fraction, removing faint stepped terraces that could show in wide, smooth areas.
