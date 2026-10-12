@@ -1,4 +1,5 @@
 # Fractal Explorer 2.5.0
+https://digitaldraven.github.io/FractalExplorer/
 
 ## Changes in 2.5.0
 - **Exports restore themselves.** PNGs now embed the complete settings. Use "Open settings from a PNG…" (My Presets) or drop a PNG onto the canvas to return to that exact view and look. 2.4.x images restore their view, Julia seed and Relief settings.
