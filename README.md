@@ -1,4 +1,9 @@
-# Fractal Explorer 2.4.0
+# Fractal Explorer 2.4.1
+
+## Changes in 2.4.1
+- Glossy Relief: the stripe texture is now interpolated by the smooth escape fraction, removing faint stepped terraces that could show in wide, smooth areas.
+- PNG metadata now also records the Julia seed and the Glossy Relief settings, so an exported image can be reproduced exactly.
+
 
 ## Changes in 2.4.0
 - **Supersampling for every mode** (Detail section: Off / 2× / 3×). Existing renderers are unchanged; the frame is rendered larger and averaged down. The Gasket (vector) is excluded; Lace and Relief use the same control. Orbit-trap relief is scaled so it looks the same when supersampled.

@@ -989,14 +989,18 @@
     for(let y = t.y0; y < t.y1; y++) for(let x = 0; x < w; x++, o += 4){
       const px = t.xmin + x * t.dx, py = t.ymax - y * t.dx;
       let zr = julia ? px : 0, zi = julia ? py : 0, cr = julia ? t.jr : px, ci = julia ? t.ji : py;
-      let n = 0, zr2 = zr*zr, zi2 = zi*zi, sum = 0;
+      let n = 0, zr2 = zr*zr, zi2 = zi*zi, sum = 0, prev = 0;
       while(n < t.maxIter && zr2 + zi2 < 1e4){
         const nzi = sg*zr*zi + ci; zr = zr2 - zi2 + cr; zi = nzi; zr2 = zr*zr; zi2 = zi*zi; n++;
-        if(t.stripe > 0) sum += 0.5 + 0.5 * Math.sin(t.sf * Math.atan2(zi, zr));
+        if(t.stripe > 0){ prev = sum; sum += 0.5 + 0.5 * Math.sin(t.sf * Math.atan2(zi, zr)); }
       }
       if(n >= t.maxIter){ out[o+3] = 1; continue; }
       out[o] = n + 1 - Math.log(0.5 * Math.log(zr2 + zi2)) / Math.LN2;
-      out[o+1] = sum / n;
+      // Blend the last two running averages by the smooth escape fraction, so the stripe texture has no steps at iteration boundaries.
+      if(t.stripe > 0){
+        const fr = Math.min(1, Math.max(0, Math.log(0.5 * Math.log(zr2 + zi2)) / Math.LN2 - Math.log(Math.log(100)) / Math.LN2));
+        out[o+1] = n > 1 ? (sum / n) * (1 - fr) + (prev / (n - 1)) * fr : sum / n;
+      }
     }
     return { buf: out };
   }
@@ -1553,8 +1557,8 @@
   }
   async function addPngMeta(blob){
     const ab = blob.arrayBuffer ? await blob.arrayBuffer() : await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsArrayBuffer(blob); });
-    const bytes = new Uint8Array(ab), params = JSON.stringify({ type: state.type, shading: state.shadingMode, cx: +state.cx.toPrecision(16), cy: +state.cy.toPrecision(16), scale: state.scale, maxIter: state.maxIter, ss: state.ss });
-    const chunks = [['Author', 'DigitalDraven'], ['Copyright', 'Created by DigitalDraven'], ['Software', 'Fractal Explorer 2.4.0'], ['Comment', 'Created by DigitalDraven using Fractal Explorer'], ['Parameters', params]].map(e => textChunk(e[0], e[1]));
+    const bytes = new Uint8Array(ab), params = JSON.stringify({ type: state.type, shading: state.shadingMode, cx: +state.cx.toPrecision(16), cy: +state.cy.toPrecision(16), scale: state.scale, maxIter: state.maxIter, ss: state.ss, juliaRe: state.juliaRe, juliaIm: state.juliaIm, reliefCycle: state.reliefCycle, reliefBump: state.reliefBump, reliefStripe: state.reliefStripe });
+    const chunks = [['Author', 'DigitalDraven'], ['Copyright', 'Created by DigitalDraven'], ['Software', 'Fractal Explorer 2.4.1'], ['Comment', 'Created by DigitalDraven using Fractal Explorer'], ['Parameters', params]].map(e => textChunk(e[0], e[1]));
     return new Blob([bytes.subarray(0, 33), ...chunks, bytes.subarray(33)], {type: 'image/png'});   // after the 33-byte signature + IHDR
   }
 
